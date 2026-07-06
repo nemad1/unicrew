@@ -1,0 +1,17 @@
+version: '3.8'
+services:
+  openwa-api:
+    image: ghcr.io/rmyndharis/openwa-api:latest
+    restart: unless-stopped
+    ports:
+      - "2785:2785"
+    environment:
+      - API_KEY=generate_a_long_random_string_here_and_keep_it_secret
+      - ENGINE_TYPE=whatsapp-web.js
+      - STORAGE_TYPE=local
+      - DATABASE_TYPE=sqlite
+    volumes:
+      - openwa-data:/app/data
+
+volumes:
+  openwa-data:
