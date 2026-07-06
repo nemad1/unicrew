@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   openwa-api:
-    image: ghcr.io/rmyndharis/openwa-api:latest
+    image: ghcr.io/rmyndharis/openwa:latest
     restart: unless-stopped
     ports:
       - "2785:2785"
