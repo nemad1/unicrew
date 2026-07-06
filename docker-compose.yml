@@ -6,7 +6,7 @@ services:
     ports:
       - "2785:2785"
     environment:
-      - API_KEY=owa_k1_72b538fae9ce803051d7dd3a663ec95928ef9d0d371c0e27d1c7f4add718d8ab
+      - WA_API_KEY=owa_k1_b9e9c693136c64f58acc4b4bef545788a84867236c513ad84c9630be0f4e3c99
       - ENGINE_TYPE=whatsapp-web.js
       - STORAGE_TYPE=local
       - DATABASE_TYPE=sqlite
