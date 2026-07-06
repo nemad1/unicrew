@@ -6,7 +6,7 @@ services:
     ports:
       - "2785:2785"
     environment:
-      - API_KEY=generate_a_long_random_string_here_and_keep_it_secret
+      - API_KEY=unicrew-239snaoanWef-asdwnt-123asdkajnsdiwe
       - ENGINE_TYPE=whatsapp-web.js
       - STORAGE_TYPE=local
       - DATABASE_TYPE=sqlite
