@@ -34,7 +34,7 @@ export default function InboxPage() {
           
         const socket = io(socketUrl, {
           extraHeaders: {
-            "X-API-Key": process.env.NEXT_PUBLIC_OPENWA_API_KEY || "owa_k1_b9e9c693136c64f58acc4b4bef545788a84867236c513ad84c9630be0f4e3c99"
+            "X-API-Key": process.env.NEXT_PUBLIC_OPENWA_API_KEY || ""
           }
         });
 
@@ -45,23 +45,60 @@ export default function InboxPage() {
 
         socket.on("message.received", (msg: any) => {
           console.log("New live message received:", msg);
-          // Optional: Fetch messages again or manually update state
-          // For simplicity, we just trigger a refetch of conversations
-          // which the other useEffect handles automatically if we had a trigger
-          // We can push to activeMessages if the contact_id matches
-          // Since we don't know the exact contact_id without matching phone, 
-          // a quick fix is to trigger a re-fetch of the messages for the active contact.
-          if (activeId) {
-             // In a real app we'd dispatch an event or use SWR.
-             // We can just forcefully update state if we want:
-             setActiveMessages(prev => [...prev, {
-               id: msg.id || Date.now().toString(),
-               content: msg.body || msg.content || "",
-               sender: msg.fromMe ? "ambassador" : "student",
-               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-               isAutomated: false
-             }]);
+
+          const msgChatId = msg.chatId || (msg.from || "");
+
+          if (activeId && msgChatId === activeId) {
+             setActiveMessages(prev => {
+                // Prevent duplicates if already added
+                if (prev.some(p => p.id === msg.id || p.id === msg.waMessageId)) return prev;
+
+                return [...prev, {
+                  id: msg.id || msg.waMessageId || Date.now().toString(),
+                  content: msg.body || msg.content || "",
+                  sender: msg.fromMe || msg.direction === 'outgoing' ? "ambassador" : "student",
+                  timestamp: msg.timestamp
+                    ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  isAutomated: false
+                }];
+             });
           }
+
+          // Update conversation list preview
+          setConversations(prev => {
+            const copy = [...prev];
+            const idx = copy.findIndex(c => c.id === msgChatId);
+            if (idx > -1) {
+              const updatedChat = { ...copy[idx] };
+              updatedChat.last_message_preview = msg.body || msg.content || "";
+              updatedChat.last_message_at = msg.timestamp
+                ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+              if (activeId !== msgChatId) {
+                updatedChat.unread_count = (updatedChat.unread_count || 0) + 1;
+              }
+
+              copy.splice(idx, 1);
+              copy.unshift(updatedChat);
+            } else {
+              // If it's a new chat, we add it to the top
+              copy.unshift({
+                id: msgChatId,
+                student_name: msgChatId.split('@')[0],
+                student_initials: msgChatId.substring(0, 2).toUpperCase(),
+                channel: "WhatsApp",
+                intent: "General",
+                unread_count: 1,
+                last_message_preview: msg.body || msg.content || "",
+                last_message_at: msg.timestamp
+                  ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              });
+            }
+            return copy;
+          });
         });
 
         return () => {
@@ -72,74 +109,76 @@ export default function InboxPage() {
   }, [whatsappStatus, sessionId, activeId]);
 
   useEffect(() => {
-    if (whatsappStatus === "CONNECTED") {
+    if (whatsappStatus === "CONNECTED" && sessionId) {
       const fetchConversations = async () => {
-        const supabase = createClient();
-        const { data, error } = await supabase
-          .from("vw_inbox_conversations")
-          .select("*")
-          .order("last_message_at", { ascending: false });
+        try {
+          const res = await fetch(`/api/whatsapp/chats?sessionId=${sessionId}`);
+          const data = await res.json();
 
-        if (error) {
-          console.error("Error fetching conversations:", error);
-          return;
-        }
+          if (Array.isArray(data)) {
+            const sortedData = [...data].sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
 
-        if (data) {
-          const mapped = data.map((row: any) => ({
-            id: row.id,
-            student_name: row.student_name || "Unknown",
-            student_initials: (row.student_name || "U").substring(0, 2).toUpperCase(),
-            channel: row.channel || "WhatsApp",
-            intent: row.intent || "General inquiry",
-            unread_count: row.unread_count || 0,
-            last_message_preview: row.last_message_preview || "",
-            last_message_at: row.last_message_at 
-              ? new Date(row.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-              : ""
-          }));
-          setConversations(mapped);
-          if (mapped.length > 0 && !activeId) {
-            setActiveId(mapped[0].id);
+            const mapped = sortedData.map((chat: any) => ({
+              id: chat.id,
+              student_name: chat.name || chat.id.split('@')[0],
+              student_initials: (chat.name || chat.id).substring(0, 2).toUpperCase(),
+              channel: "WhatsApp",
+              intent: "General",
+              unread_count: chat.unreadCount || 0,
+              last_message_preview: chat.lastMessage || "",
+              last_message_at: chat.timestamp
+                ? new Date(chat.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : ""
+            }));
+
+            setConversations(mapped);
+            if (mapped.length > 0 && !activeId) {
+              setActiveId(mapped[0].id);
+            }
           }
+        } catch (err) {
+          console.error("Error fetching conversations:", err);
         }
       };
 
       fetchConversations();
     }
-  }, [whatsappStatus, activeId]);
+  }, [whatsappStatus, activeId, sessionId]);
 
   useEffect(() => {
-    if (activeId && whatsappStatus === "CONNECTED") {
+    if (activeId && whatsappStatus === "CONNECTED" && sessionId) {
       const fetchMessages = async () => {
-        const supabase = createClient();
-        const { data, error } = await supabase
-          .from("interaction_logs")
-          .select("*")
-          .eq("contact_id", activeId)
-          .order("created_at", { ascending: true }); // oldest to newest for chat view
+        try {
+          const res = await fetch(`/api/whatsapp/messages?sessionId=${sessionId}&chatId=${encodeURIComponent(activeId)}&limit=100`);
+          const data = await res.json();
 
-        if (error) {
-          console.error("Error fetching messages:", error);
-          return;
-        }
+          if (data && Array.isArray(data.messages)) {
+            const sortedMessages = [...data.messages].sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0));
 
-        if (data) {
-          const mapped = data.map((log: any) => ({
-            id: log.id,
-            content: log.content,
-            sender: log.sender_type,
-            timestamp: new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            isAutomated: log.is_automated
-          }));
-          setActiveMessages(mapped);
+            const mapped = sortedMessages.map((msg: any) => ({
+              id: msg.id || msg.waMessageId,
+              content: msg.body,
+              sender: msg.direction === 'outgoing' ? 'ambassador' : 'student',
+              timestamp: msg.timestamp
+                 ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                 : "",
+              isAutomated: false
+            }));
+
+            setActiveMessages(mapped);
+          } else {
+             setActiveMessages([]);
+          }
+        } catch (err) {
+          console.error("Error fetching messages:", err);
+          setActiveMessages([]);
         }
       };
       fetchMessages();
     } else {
       setActiveMessages([]);
     }
-  }, [activeId, whatsappStatus]);
+  }, [activeId, whatsappStatus, sessionId]);
 
   // For the mockup, Ambassador sees a subset. Ensure "General" is included so new WhatsApp chats are visible!
   const visibleConversations = role === "ambassador"

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 const OPENWA_API_URL = process.env.NEXT_PUBLIC_OPENWA_API_URL || "https://openwa-production-7315.up.railway.app";
-const OPENWA_API_KEY = process.env.NEXT_PUBLIC_OPENWA_API_KEY || "owa_k1_b9e9c693136c64f58acc4b4bef545788a84867236c513ad84c9630be0f4e3c99";
+const OPENWA_API_KEY = process.env.OPENWA_API_KEY || "";
 
 const headers = {
   'Content-Type': 'application/json',
