@@ -97,8 +97,10 @@ async function getChatMessages(chatId, limit = 5) {
         const data = await res.json();
         if (Array.isArray(data)) {
             return data;
-        } else if (data.data && Array.isArray(data.data)) {
+        } else if (data && data.data && Array.isArray(data.data)) {
             return data.data;
+        } else if (data && data.messages && Array.isArray(data.messages)) {
+            return data.messages;
         }
         return [];
     } catch (err) {

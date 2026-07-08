@@ -28,10 +28,10 @@ export default function InboxPage() {
   useEffect(() => {
     if (whatsappStatus === "CONNECTED" && sessionId) {
       import("socket.io-client").then(({ io }) => {
-        const socketUrl = process.env.NEXT_PUBLIC_OPENWA_API_URL 
+        const socketUrl = process.env.NEXT_PUBLIC_OPENWA_API_URL
           ? `${process.env.NEXT_PUBLIC_OPENWA_API_URL}/events`
           : "https://openwa-production-7315.up.railway.app/events";
-          
+
         const socket = io(socketUrl, {
           extraHeaders: {
             "X-API-Key": process.env.NEXT_PUBLIC_OPENWA_API_KEY || ""
@@ -45,7 +45,6 @@ export default function InboxPage() {
 
         socket.on("message.received", (msg: any) => {
           console.log("New live message received:", msg);
-
           const msgChatId = msg.chatId || (msg.from || "");
 
           if (activeId && msgChatId === activeId) {
@@ -134,7 +133,6 @@ export default function InboxPage() {
             setConversations(mapped);
             if (mapped.length > 0 && !activeId) {
               setActiveId(mapped[0].id);
-            }
           }
         } catch (err) {
           console.error("Error fetching conversations:", err);
@@ -199,7 +197,7 @@ export default function InboxPage() {
             backLabel="Back to Team Overview"
           />
         ) : (
-          <SupervisorInbox 
+          <SupervisorInbox
             onSwitchToPersonal={() => setInboxMode("personal")}
             onViewProfile={() => setShowProfile(true)}
           />

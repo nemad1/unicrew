@@ -79,16 +79,15 @@ app.post('/api/whatsapp/sync', async (req, res) => {
                 const content = msg.body || msg.content || "";
                 if (!content) continue;
 
-                // Insert message to interaction logs
-                // We use insert and let the trigger handle duplicates if we added a unique constraint,
-                // but since it's a one-time sync, inserting is fine.
+                const isFromMe = msg.fromMe !== undefined ? msg.fromMe : msg.direction === 'outgoing';
+
                 await supabase
                     .from('interaction_logs')
                     .insert({
                         contact_id: contact.id,
-                        sender_type: msg.fromMe ? 'ambassador' : 'student',
+                        sender_type: isFromMe ? 'ambassador' : 'student',
                         content: content,
-                        is_read: msg.fromMe || chat.unreadCount === 0
+                        is_read: isFromMe || chat.unreadCount === 0
                     });
             }
         }
