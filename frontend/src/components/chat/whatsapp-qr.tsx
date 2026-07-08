@@ -15,7 +15,6 @@ export function WhatsappQR({ onConnected }: { onConnected: (sessionId?: string) 
   const { user } = useAuth();
   const [status, setStatus] = useState<WaStatus>("DISCONNECTED");
   const [qrCode, setQrCode] = useState<string | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -31,21 +30,7 @@ export function WhatsappQR({ onConnected }: { onConnected: (sessionId?: string) 
         if (data.status === "QR_READY" && data.qr) {
           setQrCode(data.qr);
         } else if (data.status === "CONNECTED") {
-          // If not already syncing or finished, trigger sync
-          if (!isSyncing) {
-            setIsSyncing(true);
-            try {
-              await fetch(`/api/whatsapp/sync`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId: user.id }),
-              });
-              onConnected((data as any).sessionId);
-            } catch (syncErr) {
-              console.error("Sync failed:", syncErr);
-              onConnected((data as any).sessionId); // Proceed anyway
-            }
-          }
+          onConnected((data as any).sessionId);
         }
       } catch (err) {
         console.error("Error polling WhatsApp status:", err);
@@ -55,8 +40,7 @@ export function WhatsappQR({ onConnected }: { onConnected: (sessionId?: string) 
     // Initial check
     checkStatus();
 
-    // Poll every 2 seconds, but stop polling if syncing
-    if (isSyncing) return;
+    // Poll every 2 seconds
     const interval = setInterval(checkStatus, 2000);
     
     return () => clearInterval(interval);
@@ -92,19 +76,11 @@ export function WhatsappQR({ onConnected }: { onConnected: (sessionId?: string) 
           </div>
         )}
 
-        {status === "CONNECTED" && !isSyncing && (
+        {status === "CONNECTED" && (
           <div className="flex flex-col items-center mt-6 text-emerald-600">
             <QrCode className="w-12 h-12 mb-4" />
             <p className="font-semibold">Successfully Connected!</p>
-            <p className="text-sm text-emerald-700/70 mt-1">Starting sync...</p>
-          </div>
-        )}
-
-        {isSyncing && (
-          <div className="flex flex-col items-center mt-6 text-blue-600">
-            <Loader2 className="w-12 h-12 mb-4 animate-spin" />
-            <p className="font-semibold">Syncing your chats...</p>
-            <p className="text-sm text-blue-700/70 mt-1">This may take a minute depending on your chat history.</p>
+            <p className="text-sm text-emerald-700/70 mt-1">Loading chats...</p>
           </div>
         )}
       </div>
