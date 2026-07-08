@@ -1,86 +1,110 @@
-const { makeWASocket, useMultiFileAuthState } = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode');
-const pino = require('pino');
-const path = require('path');
-const fs = require('fs');
+const requireDotenv = require('dotenv');
+requireDotenv.config();
 
-const activeSessions = new Map();
+const OPENWA_API_URL = process.env.OPENWA_API_URL;
+const OPENWA_API_KEY = process.env.OPENWA_API_KEY;
+
+const headers = {
+    'Content-Type': 'application/json',
+    'X-API-Key': OPENWA_API_KEY
+};
+
+let activeSessionId = null;
+
+async function getOrCreateSessionId() {
+    if (activeSessionId) return activeSessionId;
+    
+    try {
+        const res = await fetch(`${OPENWA_API_URL}/api/sessions`, { headers });
+        const sessions = await res.json();
+        if (Array.isArray(sessions) && sessions.length > 0) {
+            activeSessionId = sessions[0].id;
+            return activeSessionId;
+        }
+
+        const createRes = await fetch(`${OPENWA_API_URL}/api/sessions`, { 
+            method: 'POST', 
+            headers, 
+            body: JSON.stringify({ name: 'unicrew-main' }) 
+        });
+        const newSession = await createRes.json();
+        if (newSession.id) {
+            activeSessionId = newSession.id;
+            return activeSessionId;
+        }
+    } catch (err) {
+        console.error("Error getting session ID:", err);
+    }
+    return null;
+}
+
+async function getSessionStatus(userId) {
+    if (!OPENWA_API_URL) return { status: 'DISCONNECTED', qr: null };
+    try {
+        const sessionId = await getOrCreateSessionId();
+        if (!sessionId) throw new Error("Could not get session ID");
+
+        const stateRes = await fetch(`${OPENWA_API_URL}/api/sessions/${sessionId}`, { headers });
+        const stateData = await stateRes.json();
+        
+        const connectionState = stateData.status; 
+        console.log(`OpenWA Session Status for ${sessionId}: ${connectionState}`);
+
+        if (['connected', 'authenticated', 'ready', 'working', 'in-use'].includes(connectionState)) {
+            return { status: 'CONNECTED', qr: null };
+        } else if (connectionState === 'qr_ready') {
+            const qrRes = await fetch(`${OPENWA_API_URL}/api/sessions/${sessionId}/qr`, { headers });
+            const qrData = await qrRes.json();
+            return { status: 'QR_READY', qr: qrData.qrCode || qrData.qr };
+        } else if (connectionState === 'initializing' || connectionState === 'starting' || connectionState === 'authenticating') {
+            return { status: 'STARTING', qr: null };
+        } else {
+            console.log(`Triggering session start for unknown/disconnected state: ${connectionState}`);
+            await fetch(`${OPENWA_API_URL}/api/sessions/${sessionId}/start`, { method: 'POST', headers });
+            return { status: 'STARTING', qr: null };
+        }
+    } catch (err) {
+        console.error("OpenWA Status Fetch Error:", err.message);
+        return { status: 'STARTING', qr: null };
+    }
+}
 
 async function startSession(userId) {
-    if (activeSessions.has(userId)) {
-        return activeSessions.get(userId);
-    }
-
-    const authStorePath = path.join(__dirname, 'auth_store', userId);
-    
-    // Ensure auth_store directory exists
-    if (!fs.existsSync(authStorePath)) {
-        fs.mkdirSync(authStorePath, { recursive: true });
-    }
-
-    const { state, saveCreds } = await useMultiFileAuthState(authStorePath);
-    
-    // STRICT MEMORY OPTIMIZATIONS for Railway 156MB limits
-    const sock = makeWASocket({
-        auth: state,
-        printQRInTerminal: false,
-        logger: pino({ level: 'silent' }), // Reduce memory/logs
-        syncFullHistory: false,
-        shouldSyncHistoryMessage: () => false, // NEVER sync history
-        getMessage: async () => ({ conversation: '' }) // Bypass cache
-    });
-
-    const sessionData = { sock, status: 'DISCONNECTED', qrBase64: null };
-    activeSessions.set(userId, sessionData);
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, qr } = update;
-
-        if (qr) {
-            try {
-                sessionData.qrBase64 = await qrcode.toDataURL(qr);
-                sessionData.status = 'QR_READY';
-                console.log(`[${userId}] QR code generated`);
-            } catch (err) {
-                console.error(`[${userId}] Failed to generate QR Base64`, err);
-            }
-        }
-        
-        if (connection === 'open') {
-            sessionData.status = 'CONNECTED';
-            sessionData.qrBase64 = null;
-            console.log(`[${userId}] WhatsApp connection OPEN`);
-        }
-
-        if (connection === 'close') {
-            sessionData.status = 'DISCONNECTED';
-            console.log(`[${userId}] WhatsApp connection CLOSED`);
-            activeSessions.delete(userId);
-            // Optional: Reconnect logic could be added here
-        }
-    });
-
-    sock.ev.on('creds.update', saveCreds);
-
-    // Placeholder for incoming messages
-    sock.ev.on('messages.upsert', (m) => {
-        // Here we could trigger a call to our Supabase database or internal webhook
-        // We'll wire this up closely when we integrate Supabase fully.
-        console.log(`[${userId}] Received messages upsert from Baileys`);
-    });
-
-    return sessionData;
+    return getSessionStatus(userId);
 }
 
-function getSessionStatus(userId) {
-    const session = activeSessions.get(userId);
-    if (!session) {
-        return { status: 'DISCONNECTED' };
+// Fetch all chats
+async function fetchAllChats() {
+    try {
+        const sessionId = await getOrCreateSessionId();
+        const res = await fetch(`${OPENWA_API_URL}/api/sessions/${sessionId}/chats`, { headers });
+        const data = await res.json();
+        if (Array.isArray(data)) return data;
+        if (data.data && Array.isArray(data.data)) return data.data;
+        return [];
+    } catch (err) {
+        console.error("Failed to fetch chats:", err.message);
+        return [];
     }
-    return {
-        status: session.status,
-        qr: session.qrBase64
-    };
 }
 
-module.exports = { startSession, getSessionStatus };
+// Fetch recent messages for a chat
+async function getChatMessages(chatId, limit = 5) {
+    try {
+        const sessionId = await getOrCreateSessionId();
+        // The correct OpenWA API endpoint is /api/sessions/:id/messages?chatId=:chatId
+        const res = await fetch(`${OPENWA_API_URL}/api/sessions/${sessionId}/messages?chatId=${encodeURIComponent(chatId)}&limit=${limit}`, { headers });
+        const data = await res.json();
+        if (Array.isArray(data)) {
+            return data;
+        } else if (data.data && Array.isArray(data.data)) {
+            return data.data;
+        }
+        return [];
+    } catch (err) {
+        console.error(`Failed to fetch messages for ${chatId}:`, err.message);
+        return [];
+    }
+}
+
+module.exports = { startSession, getSessionStatus, fetchAllChats, getChatMessages };
