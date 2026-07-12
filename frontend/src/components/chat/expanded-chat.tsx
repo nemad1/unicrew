@@ -130,8 +130,7 @@ export function ExpandedChatView({
   };
 
   const firstName = deal.name.split(" ")[0];
-  const handle = `@${deal.name.toLowerCase().replace(/[^a-z]+/g, "")}`;
-  const contact = handle; // Mock for now
+  const contact = deal.id ? deal.id.split('@')[0] : `@${deal.name.toLowerCase().replace(/[^a-z]+/g, "")}`;
   const intentClass = intentBadgeStyles[deal.intent] ?? "bg-gray-50 text-gray-700 border-gray-200";
 
   return (

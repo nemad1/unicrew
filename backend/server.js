@@ -55,7 +55,7 @@ app.post('/api/whatsapp/sync', async (req, res) => {
 
             const name = chat.name || chat.pushname || chat.formattedTitle || phoneNumber;
 
-            // Upsert contact
+            // Upsert contact (omitting crm_label to avoid overwriting it if it already exists)
             const { data: contact, error: contactError } = await supabase
                 .from('contacts')
                 .upsert({ 
@@ -123,7 +123,10 @@ app.post('/webhook', async (req, res) => {
             // 1. Upsert contact
             const { data: contact, error: contactError } = await supabase
                 .from('contacts')
-                .upsert({ phone_number: from }, { onConflict: 'phone_number' })
+                .upsert({
+                    phone_number: from,
+                    name: data.sender?.pushname || data.sender?.name || from
+                }, { onConflict: 'phone_number' })
                 .select('id')
                 .single();
 
@@ -148,6 +151,34 @@ app.post('/webhook', async (req, res) => {
     console.error('Webhook error:', err);
     res.status(500).send('Internal Server Error');
   }
+});
+
+// ==========================================
+// CRM CONTACT ENDPOINTS
+// ==========================================
+app.put('/api/contacts/:phone_number/label', async (req, res) => {
+    const { phone_number } = req.params;
+    const { crm_label } = req.body;
+
+    if (!phone_number) {
+        return res.status(400).json({ error: 'phone_number is required' });
+    }
+
+    try {
+        // Upsert to ensure we create the contact row if it doesn't exist
+        const { data, error } = await supabase
+            .from('contacts')
+            .upsert({ phone_number, crm_label }, { onConflict: 'phone_number' })
+            .select('phone_number, crm_label, name')
+            .single();
+
+        if (error) throw error;
+
+        res.json({ success: true, contact: data });
+    } catch (err) {
+        console.error("Update label error:", err);
+        res.status(500).json({ error: "Internal Error" });
+    }
 });
 
 app.listen(PORT, () => {

@@ -10,6 +10,9 @@ import {
   UserCheck,
   AlertTriangle,
   ExternalLink,
+  Edit2,
+  Check,
+  X
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -19,6 +22,7 @@ import { MessageBubble } from "./message-bubble";
 import { WhatsAppIcon, InstagramIcon } from "@/components/icons/channel-icons";
 import type { Message, Conversation, SenderType } from "@/types/messages";
 import type { Role } from "@/types/roles";
+import { createClient } from "@/lib/supabase/client";
 
 export type ChatWorkspaceProps = {
   role: Role;
@@ -33,6 +37,7 @@ export type ChatWorkspaceProps = {
   onViewProfile?: () => void;
   onEscalate?: () => void;
   suggestedFact?: string;
+  onContactUpdated?: (rawPhone: string, newLabel: string) => void;
 };
 
 function nowTime() {
@@ -47,12 +52,17 @@ export function ChatWorkspace({
   onOpenProfile,
   onEscalate,
   suggestedFact,
+  onContactUpdated,
 }: ChatWorkspaceProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [draft, setDraft] = useState("");
   const [aiSuggestionsOpen, setAiSuggestionsOpen] = useState(false);
   const [showFact, setShowFact] = useState(!!suggestedFact);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [isEditingContact, setIsEditingContact] = useState(false);
+  const [editContactName, setEditContactName] = useState("");
+  const supabase = createClient();
 
   // Sync messages when the conversation changes
   useEffect(() => {
@@ -64,6 +74,33 @@ export function ChatWorkspace({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
+
+  const handleSaveContact = async () => {
+    if (!conversation || !conversation.id) return;
+    const rawPhone = conversation.id.split('@')[0];
+    const newLabel = editContactName.trim() || null;
+
+    try {
+      const res = await fetch(`/api/contacts/${rawPhone}/label`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ crm_label: newLabel })
+      });
+
+      if (res.ok) {
+        toast.success("Contact label updated");
+        setIsEditingContact(false);
+        if (onContactUpdated) {
+          onContactUpdated(rawPhone, newLabel || "");
+        }
+      } else {
+        toast.error("Failed to update contact label");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error updating contact label");
+    }
+  };
 
   const send = (text: string) => {
     const trimmed = text.trim();
@@ -216,9 +253,9 @@ export function ChatWorkspace({
       )
     );
 
-  // Derived mock contact detail
-  const mockPhoneStr = conversation.channel === "WhatsApp"
-    ? `+60 12-345 ${(6789 + Number(conversation.id || 0)).toString().slice(0, 4)}`
+  // Derived contact detail (show raw phone number or instagram handle)
+  const contactStr = conversation.channel === "WhatsApp"
+    ? conversation.id.split('@')[0]
     : `@${conversation.student_name.toLowerCase().replace(/[^a-z]+/g, "")}`;
 
   return (
@@ -230,14 +267,46 @@ export function ChatWorkspace({
             {conversation.student_initials}
           </div>
           <div className="leading-tight min-w-0">
-            <div className="text-sm font-semibold text-gray-900 truncate">{conversation.student_name}</div>
+            <div className="flex items-center gap-2">
+              {isEditingContact ? (
+                <div className="flex items-center gap-1">
+                  <Input
+                    value={editContactName}
+                    onChange={e => setEditContactName(e.target.value)}
+                    className="h-6 text-sm px-2 w-48"
+                    autoFocus
+                    placeholder="Enter CRM label"
+                    onKeyDown={(e) => { if(e.key === 'Enter') handleSaveContact(); }}
+                  />
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600" onClick={handleSaveContact}>
+                    <Check className="w-4 h-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-red-600" onClick={() => setIsEditingContact(false)}>
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <div className="text-sm font-semibold text-gray-900 truncate">{conversation.student_name}</div>
+                  {role === "counselor" && (
+                    <button
+                      onClick={() => { setEditContactName(conversation.student_name); setIsEditingContact(true); }}
+                      className="text-gray-400 hover:text-gray-600 transition-colors"
+                      title="Edit CRM Label"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
             <div className="text-xs text-gray-500 flex items-center gap-1.5 mt-0.5">
               {conversation.channel === "WhatsApp" ? (
                 <WhatsAppIcon className="w-3 h-3 text-green-500 shrink-0" />
               ) : (
                 <InstagramIcon className="w-3 h-3 text-pink-500 shrink-0" />
               )}
-              <span className="truncate">{mockPhoneStr}</span>
+              <span className="truncate">{contactStr}</span>
             </div>
           </div>
         </div>

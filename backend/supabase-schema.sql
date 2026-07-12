@@ -38,7 +38,8 @@ CREATE TABLE contacts (
     ai_tags JSONB DEFAULT '[]'::jsonb,
     fields JSONB DEFAULT '[]'::jsonb,    
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    crm_label TEXT
 );
 
 -- 5. INTERACTION LOGS
