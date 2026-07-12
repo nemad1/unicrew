@@ -1,21 +1,24 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useEffect, useState, useRef } from "react";
+import { useAuth } from "@/contexts/auth-context";
 import { ChatList } from "@/components/chat/chat-list";
 import { ChatWorkspace } from "@/components/chat/chat-workspace";
-import { SupervisorInbox } from "@/components/chat/supervisor-inbox";
 import { WhatsappQR } from "@/components/chat/whatsapp-qr";
 import { ProspectProfile } from "@/components/prospect-profile";
-import { useAuth } from "@/contexts/auth-context";
-// Removed mock messages
-
+import { SupervisorInbox } from "@/components/chat/supervisor-inbox";
 import { MessageSquareDashed } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 type InboxMode = "personal" | "team";
 
+function normalizePhoneNumber(phone: string) {
+  return phone.replace(/\D/g, "");
+}
+
 export default function InboxPage() {
   const { role } = useAuth();
+  const supabase = createClient();
 
   const [activeId, setActiveId] = useState<string>("");
   const [inboxMode, setInboxMode] = useState<InboxMode>("team");
@@ -23,6 +26,32 @@ export default function InboxPage() {
   const [sessionId, setSessionId] = useState<string>("");
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeMessages, setActiveMessages] = useState<any[]>([]);
+  const [crmContacts, setCrmContacts] = useState<Record<string, string>>({});
+
+  const crmContactsRef = useRef<Record<string, string>>({});
+
+  // Sync the ref with state to allow the socket closure to read the latest map
+  useEffect(() => {
+    crmContactsRef.current = crmContacts;
+  }, [crmContacts]);
+
+  useEffect(() => {
+    const fetchCrmContacts = async () => {
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("phone_number, crm_label")
+        .not("crm_label", "is", null);
+
+      if (!error && data) {
+        const mapping: Record<string, string> = {};
+        data.forEach(c => {
+          mapping[normalizePhoneNumber(c.phone_number)] = c.crm_label;
+        });
+        setCrmContacts(mapping);
+      }
+    };
+    fetchCrmContacts();
+  }, [supabase]);
 
   // Setup Socket.IO for live messages
   useEffect(() => {
@@ -46,6 +75,8 @@ export default function InboxPage() {
         socket.on("message.received", (msg: any) => {
           console.log("New live message received:", msg);
           const msgChatId = msg.chatId || (msg.from || "");
+          const rawPhone = msgChatId.split('@')[0];
+          const resolvedName = crmContactsRef.current[rawPhone] || msg.sender?.pushname || msg.sender?.name || rawPhone;
 
           if (activeId && msgChatId === activeId) {
              setActiveMessages(prev => {
@@ -74,6 +105,8 @@ export default function InboxPage() {
               updatedChat.last_message_at = msg.timestamp
                 ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              updatedChat.student_name = resolvedName;
+              updatedChat.student_initials = resolvedName.substring(0, 2).toUpperCase();
 
               if (activeId !== msgChatId) {
                 updatedChat.unread_count = (updatedChat.unread_count || 0) + 1;
@@ -85,8 +118,8 @@ export default function InboxPage() {
               // If it's a new chat, we add it to the top
               copy.unshift({
                 id: msgChatId,
-                student_name: msgChatId.split('@')[0],
-                student_initials: msgChatId.substring(0, 2).toUpperCase(),
+                student_name: resolvedName,
+                student_initials: resolvedName.substring(0, 2).toUpperCase(),
                 channel: "WhatsApp",
                 intent: "General",
                 unread_count: 1,
@@ -105,7 +138,7 @@ export default function InboxPage() {
         };
       });
     }
-  }, [whatsappStatus, sessionId, activeId]);
+  }, [whatsappStatus, sessionId, activeId]); // removed crmContacts from dependency
 
   useEffect(() => {
     if (whatsappStatus === "CONNECTED" && sessionId) {
@@ -117,22 +150,27 @@ export default function InboxPage() {
           if (Array.isArray(data)) {
             const sortedData = [...data].sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
 
-            const mapped = sortedData.map((chat: any) => ({
-              id: chat.id,
-              student_name: chat.name || chat.id.split('@')[0],
-              student_initials: (chat.name || chat.id).substring(0, 2).toUpperCase(),
-              channel: "WhatsApp",
-              intent: "General",
-              unread_count: chat.unreadCount || 0,
-              last_message_preview: chat.lastMessage || "",
-              last_message_at: chat.timestamp
-                ? new Date(chat.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                : ""
-            }));
+            const mapped = sortedData.map((chat: any) => {
+              const rawPhone = chat.id.split('@')[0];
+              const resolvedName = crmContacts[rawPhone] || chat.name || chat.pushname || rawPhone;
+              return {
+                id: chat.id,
+                student_name: resolvedName,
+                student_initials: resolvedName.substring(0, 2).toUpperCase(),
+                channel: "WhatsApp",
+                intent: "General",
+                unread_count: chat.unreadCount || 0,
+                last_message_preview: chat.lastMessage || "",
+                last_message_at: chat.timestamp
+                  ? new Date(chat.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  : ""
+              };
+            });
 
             setConversations(mapped);
             if (mapped.length > 0 && !activeId) {
               setActiveId(mapped[0].id);
+            }
           }
         } catch (err) {
           console.error("Error fetching conversations:", err);
@@ -141,7 +179,25 @@ export default function InboxPage() {
 
       fetchConversations();
     }
-  }, [whatsappStatus, activeId, sessionId]);
+  }, [whatsappStatus, activeId, sessionId]); // removed crmContacts from dependency
+
+  // Effect to update existing conversations locally when crmContacts changes (without refetching)
+  useEffect(() => {
+    setConversations(prev => prev.map(chat => {
+      const rawPhone = chat.id.split('@')[0];
+      const newLabel = crmContacts[rawPhone];
+      const resolvedName = newLabel || chat.name || chat.pushname || rawPhone;
+
+      if (chat.student_name !== resolvedName) {
+        return {
+          ...chat,
+          student_name: resolvedName,
+          student_initials: resolvedName.substring(0, 2).toUpperCase()
+        };
+      }
+      return chat;
+    }));
+  }, [crmContacts]);
 
   useEffect(() => {
     if (activeId && whatsappStatus === "CONNECTED" && sessionId) {
@@ -178,7 +234,6 @@ export default function InboxPage() {
     }
   }, [activeId, whatsappStatus, sessionId]);
 
-  // For the mockup, Ambassador sees a subset. Ensure "General" is included so new WhatsApp chats are visible!
   const visibleConversations = role === "ambassador"
     ? conversations.filter(c => c.intent === "Campus Life" || c.intent === "Courses" || c.intent === "General")
     : conversations;
@@ -187,7 +242,6 @@ export default function InboxPage() {
 
   const [showProfile, setShowProfile] = useState(false);
 
-  // Team overview (Supervisor Inbox) — only for counselor role
   if (role === "counselor" && inboxMode === "team") {
     return (
       <div className="flex-1 flex h-full overflow-hidden">
@@ -206,7 +260,6 @@ export default function InboxPage() {
     );
   }
 
-  // Personal inbox header with mode toggle (for counselor role)
   const inboxHeader = role === "counselor" ? (
     <div className="p-3 border-b border-gray-200">
       <div className="grid grid-cols-2 bg-gray-100 rounded-md p-1">
@@ -227,7 +280,6 @@ export default function InboxPage() {
 
   return (
     <div className="flex-1 flex h-full overflow-hidden">
-      {/* Left pane: Chat List */}
       <ChatList
         activeId={activeId}
         conversations={visibleConversations}
@@ -235,7 +287,6 @@ export default function InboxPage() {
         header={inboxHeader}
       />
 
-      {/* Right pane: Active Workspace */}
       <div className="flex-1 flex flex-col bg-white overflow-hidden">
         {whatsappStatus !== "CONNECTED" ? (
           <WhatsappQR onConnected={(sid?: string) => {
@@ -250,12 +301,15 @@ export default function InboxPage() {
           />
         ) : activeConversation ? (
           <ChatWorkspace
-            key={activeConversation.id} // force remount on switch
+            key={activeConversation.id}
             role={role}
             conversation={activeConversation}
             initialMessages={activeMessages}
             onViewProfile={() => setShowProfile(true)}
             onOpenProfile={() => setShowProfile(true)}
+            onContactUpdated={(rawPhone, newLabel) => {
+              setCrmContacts(prev => ({ ...prev, [rawPhone]: newLabel }));
+            }}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8 text-center bg-gray-50/40">
