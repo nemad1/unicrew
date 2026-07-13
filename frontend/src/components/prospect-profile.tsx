@@ -168,7 +168,35 @@ export function ProspectProfile({
   const [draft, setDraft] = useState("");
   const [editingFields, setEditingFields] = useState<Record<string, boolean>>({});
   const [stages, setStages] = useState<{ id: string; name: string }[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState("");
   const supabase = createClient();
+
+  const handleAnalyze = async () => {
+    if (!rawPhone) return;
+    setIsAnalyzing(true);
+    setAnalyzeError("");
+    try {
+      const res = await fetch(`/api/ai/analyze/${rawPhone}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to analyze profile');
+      }
+      if (prospect && data.profile) {
+        setProspect({
+          ...prospect,
+          aiSummary: data.profile.ai_summary,
+          aiTags: Array.isArray(data.profile.ai_tags) ? data.profile.ai_tags.map((t: any) => typeof t === 'string' ? { label: t, cls: 'bg-blue-50 text-blue-700 border-blue-200' } : t) : [],
+          enrollmentProbability: data.profile.enrollment_probability,
+          fields: data.profile.fields
+        });
+      }
+    } catch (err: any) {
+      setAnalyzeError(err.message || "Failed to trigger analysis.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   useEffect(() => {
     fetch('/api/kanban/stages')
@@ -428,13 +456,36 @@ export function ProspectProfile({
           <div className="space-y-6 min-w-0">
             {/* AI Context Summary */}
             <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-blue-700" />
-                <h2 className="text-sm text-gray-900 font-medium">AI Context Summary</h2>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-blue-700" />
+                  <h2 className="text-sm text-gray-900 font-medium">AI Context Summary</h2>
+                </div>
+                {!readOnly && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="h-7 text-xs" 
+                    onClick={handleAnalyze} 
+                    disabled={isAnalyzing}
+                  >
+                    {isAnalyzing ? (
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600 mr-1"></div>
+                    ) : (
+                      <Bot className="w-3.5 h-3.5 mr-1" />
+                    )}
+                    {isAnalyzing ? "Analyzing..." : "Refresh AI Insights"}
+                  </Button>
+                )}
               </div>
               <p className="text-xs text-gray-500 mt-0.5 mb-3">
                 Synthesized from conversation history.
               </p>
+              {analyzeError && (
+                <div className="text-xs text-red-600 mb-3 bg-red-50 p-2 rounded border border-red-100">
+                  {analyzeError}
+                </div>
+              )}
               <div className="bg-blue-50/60 border border-blue-100 rounded-md p-4 text-sm text-gray-800 leading-relaxed">
                 {prospect.aiSummary}
               </div>

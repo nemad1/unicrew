@@ -20,6 +20,65 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const PORT = process.env.PORT || 3001;
 
 // ==========================================
+// AI HELPER
+// ==========================================
+
+async function applyAiAnalysis(contact, aiData) {
+    if (!aiData) return null;
+
+    let updatedFields = contact.fields || [
+        { label: "Current High School", value: "" },
+        { label: "Target Course", value: "" },
+        { label: "Intended Intake", value: "" },
+        { label: "Assigned Ambassador", value: "" },
+        { label: "Assigned Counselor", value: "" },
+        { label: "Source Channel", value: "WhatsApp" }
+    ];
+
+    if (aiData.fields) {
+        for (const [key, value] of Object.entries(aiData.fields)) {
+            if (value) {
+                const fieldIndex = updatedFields.findIndex(f => f.label === key);
+                if (fieldIndex >= 0) {
+                    updatedFields[fieldIndex].value = value;
+                } else {
+                    updatedFields.push({ label: key, value });
+                }
+            }
+        }
+    }
+
+    await supabase
+        .from('contacts')
+        .update({
+            ai_summary: aiData.summary,
+            ai_tags: aiData.tags || [],
+            enrollment_probability: aiData.probability || 0,
+            intent: aiData.intent || 'General',
+            fields: updatedFields
+        })
+        .eq('id', contact.id);
+
+    if (aiData.timeline_update) {
+        await supabase.from('interaction_logs').insert({
+            contact_id: contact.id,
+            sender_type: 'system',
+            content: aiData.timeline_update,
+            is_read: true,
+            is_automated: true
+        });
+    }
+
+    return {
+        ai_summary: aiData.summary,
+        ai_tags: aiData.tags || [],
+        enrollment_probability: aiData.probability || 0,
+        intent: aiData.intent || 'General',
+        fields: updatedFields
+    };
+}
+
+// ==========================================
 // WHATSAPP SESSION ENDPOINTS
 // ==========================================
 
@@ -101,49 +160,8 @@ app.post('/api/whatsapp/sync', async (req, res) => {
                     console.log(`[Sync AI] Generating background summary for ${phoneNumber}...`);
                     const aiData = await analyzeContactProfile(contact.id, recentLogs);
                     if (aiData) {
-                        let updatedFields = contact.fields || [
-                            { label: "Current High School", value: "" },
-                            { label: "Target Course", value: "" },
-                            { label: "Intended Intake", value: "" },
-                            { label: "Assigned Ambassador", value: "" },
-                            { label: "Assigned Counselor", value: "" },
-                            { label: "Source Channel", value: "WhatsApp" }
-                        ];
-
-                        if (aiData.fields) {
-                            for (const [key, value] of Object.entries(aiData.fields)) {
-                                if (value) {
-                                    const fieldIndex = updatedFields.findIndex(f => f.label === key);
-                                    if (fieldIndex >= 0) {
-                                        updatedFields[fieldIndex].value = value;
-                                    } else {
-                                        updatedFields.push({ label: key, value });
-                                    }
-                                }
-                            }
-                        }
-
-                        await supabase
-                            .from('contacts')
-                            .update({
-                                ai_summary: aiData.summary,
-                                ai_tags: aiData.tags || [],
-                                enrollment_probability: aiData.probability || 0,
-                                intent: aiData.intent || 'General',
-                                fields: updatedFields
-                            })
-                            .eq('id', contact.id);
+                        await applyAiAnalysis(contact, aiData);
                         console.log(`[Sync AI] Updated profile for ${phoneNumber}`);
-
-                        if (aiData.timeline_update) {
-                            await supabase.from('interaction_logs').insert({
-                                contact_id: contact.id,
-                                sender_type: 'system',
-                                content: aiData.timeline_update,
-                                is_read: true,
-                                is_automated: true
-                            });
-                        }
                     }
                 }
             }
@@ -229,49 +247,8 @@ app.post('/webhook', async (req, res) => {
                         if (recentLogs) {
                             const aiData = await analyzeContactProfile(contact.id, recentLogs);
                             if (aiData) {
-                                let updatedFields = contact.fields || [
-                                    { label: "Current High School", value: "" },
-                                    { label: "Target Course", value: "" },
-                                    { label: "Intended Intake", value: "" },
-                                    { label: "Assigned Ambassador", value: "" },
-                                    { label: "Assigned Counselor", value: "" },
-                                    { label: "Source Channel", value: "WhatsApp" }
-                                ];
-
-                                if (aiData.fields) {
-                                    for (const [key, value] of Object.entries(aiData.fields)) {
-                                        if (value) {
-                                            const fieldIndex = updatedFields.findIndex(f => f.label === key);
-                                            if (fieldIndex >= 0) {
-                                                updatedFields[fieldIndex].value = value;
-                                            } else {
-                                                updatedFields.push({ label: key, value });
-                                            }
-                                        }
-                                    }
-                                }
-
-                                await supabase
-                                    .from('contacts')
-                                    .update({
-                                        ai_summary: aiData.summary,
-                                        ai_tags: aiData.tags || [],
-                                        enrollment_probability: aiData.probability || 0,
-                                        intent: aiData.intent || 'General',
-                                        fields: updatedFields
-                                    })
-                                    .eq('id', contact.id);
+                                await applyAiAnalysis(contact, aiData);
                                 console.log(`[Webhook AI] Updated profile for ${from}`);
-
-                                if (aiData.timeline_update) {
-                                    await supabase.from('interaction_logs').insert({
-                                        contact_id: contact.id,
-                                        sender_type: 'system',
-                                        content: aiData.timeline_update,
-                                        is_read: true,
-                                        is_automated: true
-                                    });
-                                }
                             }
                         }
                     }
@@ -292,6 +269,52 @@ app.post('/webhook', async (req, res) => {
 // ==========================================
 // CRM CONTACT ENDPOINTS
 // ==========================================
+
+app.post('/api/ai/analyze/:phone_number', async (req, res) => {
+    const { phone_number } = req.params;
+    
+    if (!phone_number) {
+        return res.status(400).json({ error: 'phone_number is required' });
+    }
+
+    try {
+        const { data: contact, error: contactError } = await supabase
+            .from('contacts')
+            .select('id, ai_summary, fields')
+            .eq('phone_number', phone_number)
+            .single();
+
+        if (contactError || !contact) {
+            return res.status(404).json({ error: 'Contact not found' });
+        }
+
+        const { data: recentLogs } = await supabase
+            .from('interaction_logs')
+            .select('sender_type, content')
+            .eq('contact_id', contact.id)
+            .order('created_at', { ascending: true })
+            .limit(15);
+
+        if (!recentLogs || recentLogs.length === 0) {
+             return res.status(400).json({ error: 'No interactions found for analysis' });
+        }
+        
+        console.log(`[Manual AI Analysis] Starting analysis for ${phone_number}...`);
+        const aiData = await analyzeContactProfile(contact.id, recentLogs);
+        
+        if (aiData) {
+            const updatedProfile = await applyAiAnalysis(contact, aiData);
+            console.log(`[Manual AI Analysis] Completed and updated profile for ${phone_number}`);
+            return res.json({ success: true, profile: updatedProfile });
+        } else {
+            return res.status(500).json({ error: 'Failed to analyze profile' });
+        }
+    } catch (err) {
+        console.error("Manual AI analyze error:", err);
+        res.status(500).json({ error: "Internal Error" });
+    }
+});
+
 app.put('/api/contacts/:phone_number/label', async (req, res) => {
     const { phone_number } = req.params;
     const { name } = req.body;
