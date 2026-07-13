@@ -4,9 +4,9 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:3001";
 
 export async function POST(
   request: Request,
-  { params }: { params: { phone_number: string } }
+  { params }: { params: Promise<{ phone_number: string }> }
 ) {
-  const { phone_number } = params;
+  const { phone_number } = await params;
 
   try {
     const res = await fetch(`${BACKEND_URL}/api/ai/analyze/${phone_number}`, {
