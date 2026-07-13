@@ -38,8 +38,7 @@ CREATE TABLE contacts (
     ai_tags JSONB DEFAULT '[]'::jsonb,
     fields JSONB DEFAULT '[]'::jsonb,    
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    crm_label TEXT
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 5. INTERACTION LOGS
@@ -61,7 +60,9 @@ ON interaction_logs(contact_id, created_at DESC);
 
 -- AUTO-PRUNING TRIGGER (Keep last 100 messages)
 CREATE OR REPLACE FUNCTION prune_interaction_logs()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER 
+SET search_path = public
+AS $$
 BEGIN
   DELETE FROM interaction_logs
   WHERE id IN (
@@ -167,7 +168,7 @@ CREATE TABLE ambassador_shifts (
 );
 
 -- 11. VIEWS
-CREATE OR REPLACE VIEW vw_inbox_conversations AS
+CREATE OR REPLACE VIEW vw_inbox_conversations WITH (security_invoker = on) AS
 SELECT 
   c.id,
   c.name AS student_name,
@@ -189,3 +190,45 @@ LEFT JOIN LATERAL (
 -- 12. PERMISSIONS
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon, authenticated;
 GRANT SELECT ON vw_inbox_conversations TO anon, authenticated;
+
+-- 13. RAG KNOWLEDGE BASE
+CREATE EXTENSION IF NOT EXISTS vector;
+
+DROP FUNCTION IF EXISTS match_documents;
+DROP TABLE IF EXISTS knowledge_base;
+
+CREATE TABLE knowledge_base (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT,
+    content TEXT NOT NULL,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    embedding vector(3072),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+
+CREATE OR REPLACE FUNCTION match_documents (
+  query_embedding vector(3072),
+  match_threshold float,
+  match_count int
+)
+RETURNS TABLE (
+  id uuid,
+  title text,
+  content text,
+  metadata jsonb,
+  similarity float
+)
+LANGUAGE sql STABLE
+AS $$
+  SELECT
+    knowledge_base.id,
+    knowledge_base.title,
+    knowledge_base.content,
+    knowledge_base.metadata,
+    1 - (knowledge_base.embedding <=> query_embedding) AS similarity
+  FROM knowledge_base
+  WHERE 1 - (knowledge_base.embedding <=> query_embedding) > match_threshold
+  ORDER BY knowledge_base.embedding <=> query_embedding
+  LIMIT match_count;
+$$;

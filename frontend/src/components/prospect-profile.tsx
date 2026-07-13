@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { createClient } from "@/lib/supabase/client";
 import {
   ChevronLeft,
   Mail,
@@ -48,7 +49,7 @@ export type ProspectData = {
   name: string;
   phone: string;
   email: string;
-  leadStatus: "new" | "active" | "submitted" | "enrolled";
+  leadStatus: string;
   enrollmentProbability: number;
   aiSummary: string;
   aiTags: { label: string; cls: string }[];
@@ -57,66 +58,7 @@ export type ProspectData = {
   timeline: ProspectTimelineEvent[];
 };
 
-// ─── Default data (counselor view — Carlos Mendoza) ───────────────────────────
 
-export const defaultProspect: ProspectData = {
-  initials: "CM",
-  avatarClass: "bg-blue-100 text-blue-700",
-  name: "Carlos Mendoza",
-  phone: "+52 55 1234 5678",
-  email: "carlos.mendoza@gmail.com",
-  leadStatus: "active",
-  enrollmentProbability: 75,
-  aiSummary:
-    "Carlos is highly interested in the BSc Computer Science program. He exhibits high enthusiasm for the syllabus but has expressed underlying anxiety regarding hidden lab fees and off-campus safety at night. He is currently being advised by an external agent but prefers our peer-to-peer channel for authentic campus life queries.",
-  aiTags: [
-    { label: "Price Sensitive",  cls: "bg-amber-50 text-amber-700 border-amber-200" },
-    { label: "Safety Concerns",  cls: "bg-red-50 text-red-700 border-red-200" },
-    { label: "Agent Flight Risk", cls: "bg-violet-50 text-violet-700 border-violet-200" },
-  ],
-  fields: [
-    { label: "Current High School",  value: "Instituto Tecnológico de Monterrey" },
-    { label: "Target Course",        value: "BSc Computer Science" },
-    { label: "Intended Intake",      value: "September 2026" },
-    { label: "Assigned Ambassador",  value: "Adel Zeinab" },
-    { label: "Assigned Counselor",   value: "Amelia Park" },
-    { label: "Source Channel",       value: "WhatsApp · Meta Campaign" },
-  ],
-  notes: [
-    {
-      author: "Adel Zeinab",
-      role: "Ambassador",
-      time: "Today, 10:42 AM",
-      body: "Carlos seems much more relaxed after our call about hostel life. Wants to revisit fee questions next week.",
-    },
-    {
-      author: "Amelia Park",
-      role: "Admissions Lead",
-      time: "Yesterday, 4:18 PM",
-      body: "Followed up after intake forms — confirmed eligibility for the September 2026 intake.",
-    },
-  ],
-  timeline: [
-    {
-      icon: Bot,
-      iconClass: "bg-blue-100 text-blue-700",
-      title: "AI Auto-Reply triggered (Fees intent)",
-      time: "2 hours ago",
-    },
-    {
-      icon: UserCheck,
-      iconClass: "bg-emerald-100 text-emerald-700",
-      title: "Handed off to Adel Zeinab",
-      time: "Yesterday",
-    },
-    {
-      icon: MessageCircle,
-      iconClass: "bg-violet-100 text-violet-700",
-      title: "Opted-in via WhatsApp Meta Campaign",
-      time: "3 days ago",
-    },
-  ],
-};
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -149,32 +91,58 @@ function RadialProgress({ value }: { value: number }) {
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
-  const [editing, setEditing] = useState(false);
+function Field({
+  label,
+  value,
+  isEditing,
+  onEditToggle,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  isEditing: boolean;
+  onEditToggle: () => void;
+  onChange: (val: string) => void;
+}) {
   const [fieldValue, setFieldValue] = useState(value);
+
+  useEffect(() => {
+    setFieldValue(value);
+  }, [value]);
+
+  const handleToggle = () => {
+    if (isEditing && fieldValue !== value) {
+      onChange(fieldValue);
+    }
+    onEditToggle();
+  };
+
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <label className="text-xs text-gray-500">{label}</label>
         <button
-          onClick={() => setEditing((e) => !e)}
+          onClick={handleToggle}
           className={cn(
             "transition-colors",
-            editing ? "text-blue-700 hover:text-blue-800" : "text-gray-400 hover:text-gray-700",
+            isEditing ? "text-blue-700 hover:text-blue-800" : "text-gray-400 hover:text-gray-700",
           )}
-          title={editing ? "Save" : "Edit"}
+          title={isEditing ? "Save" : "Edit"}
         >
-          {editing ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+          {isEditing ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
         </button>
       </div>
       <Input
         value={fieldValue}
         onChange={(e) => setFieldValue(e.target.value)}
-        readOnly={!editing}
+        readOnly={!isEditing}
         className={cn(
           "bg-white",
-          editing ? "border-blue-400 ring-1 ring-blue-200" : "border-gray-200 text-gray-700",
+          isEditing ? "border-blue-400 ring-1 ring-blue-200" : "border-gray-200 text-gray-700",
         )}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleToggle();
+        }}
       />
     </div>
   );
@@ -185,18 +153,122 @@ function Field({ label, value }: { label: string; value: string }) {
 export function ProspectProfile({
   onBack,
   backLabel = "Back to Pipeline",
-  prospect = defaultProspect,
-  /** When true, hides counselor-only controls (lead status selector, Edit All fields) */
+  rawPhone,
   readOnly = false,
 }: {
   onBack: () => void;
   backLabel?: string;
-  prospect?: ProspectData;
+  rawPhone?: string;
   readOnly?: boolean;
 }) {
   const isMobile = useMediaQuery("(max-width: 767px)");
-  const [notes, setNotes] = useState<ProspectNote[]>(prospect.notes);
+  const [prospect, setProspect] = useState<ProspectData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notes, setNotes] = useState<ProspectNote[]>([]);
   const [draft, setDraft] = useState("");
+  const [editingFields, setEditingFields] = useState<Record<string, boolean>>({});
+  const [stages, setStages] = useState<{ id: string; name: string }[]>([]);
+  const supabase = createClient();
+
+  useEffect(() => {
+    fetch('/api/kanban/stages')
+      .then(res => res.json())
+      .then(data => {
+        if (data.stages) setStages(data.stages);
+      })
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    if (!rawPhone) {
+      setLoading(false);
+      return;
+    }
+
+    async function fetchContact() {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/contacts/${rawPhone}`);
+        const json = await res.json();
+        
+        if (!res.ok || !json.contact) {
+          setProspect({
+             initials: "??",
+             avatarClass: "bg-gray-100 text-gray-700",
+             name: "Unknown Contact",
+             phone: rawPhone || "",
+             email: "-",
+             leadStatus: "new",
+             enrollmentProbability: 0,
+             aiSummary: "Pending AI Analysis...",
+             aiTags: [],
+             fields: [
+               { label: "Current High School", value: "" },
+               { label: "Target Course", value: "" },
+               { label: "Intended Intake", value: "" },
+               { label: "Assigned Ambassador", value: "" },
+               { label: "Assigned Counselor", value: "" },
+               { label: "Source Channel", value: "" },
+             ],
+             notes: [],
+             timeline: []
+          });
+        } else {
+          const contact = json.contact;
+          const name = contact.name || contact.phone_number;
+          setProspect({
+             initials: name.substring(0, 2).toUpperCase(),
+             avatarClass: "bg-blue-100 text-blue-700",
+             name,
+             phone: contact.phone_number,
+             email: contact.email || "-",
+             leadStatus: contact.lead_status || "new",
+             enrollmentProbability: contact.enrollment_probability || 0,
+             aiSummary: contact.ai_summary || "Pending AI Analysis...",
+             aiTags: Array.isArray(contact.ai_tags) ? contact.ai_tags.map((t: any) => typeof t === 'string' ? { label: t, cls: 'bg-blue-50 text-blue-700 border-blue-200' } : t) : [],
+             fields: Array.isArray(contact.fields) && contact.fields.length > 0 ? contact.fields : [
+               { label: "Current High School", value: "" },
+               { label: "Target Course", value: "" },
+               { label: "Intended Intake", value: "" },
+               { label: "Assigned Ambassador", value: "" },
+               { label: "Assigned Counselor", value: "" },
+               { label: "Source Channel", value: contact.channel || "WhatsApp" },
+             ],
+             notes: [],
+             timeline: Array.isArray(contact.interaction_logs) ? contact.interaction_logs.map((log: any) => ({
+               icon: Sparkles,
+               iconClass: 'bg-purple-100 text-purple-700',
+               title: log.content,
+               time: new Date(log.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+             })) : []
+          });
+        }
+      } catch (err) {
+        console.error("Error fetching contact:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchContact();
+  }, [rawPhone, supabase]);
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex flex-col bg-white items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-700"></div>
+        <p className="mt-4 text-sm text-gray-500">Loading profile...</p>
+      </div>
+    );
+  }
+
+  if (!prospect) {
+    return (
+      <div className="flex-1 flex flex-col bg-white items-center justify-center">
+        <p className="text-gray-500">Contact not saved in CRM</p>
+        <Button variant="outline" className="mt-4" onClick={onBack}>Go Back</Button>
+      </div>
+    );
+  }
 
   const saveNote = () => {
     const text = draft.trim();
@@ -211,6 +283,50 @@ export function ProspectProfile({
       ...prev,
     ]);
     setDraft("");
+  };
+
+  const handleFieldSave = async (label: string, newValue: string) => {
+    if (!prospect || !rawPhone) return;
+    const updatedFields = prospect.fields.map(f => f.label === label ? { ...f, value: newValue } : f);
+    setProspect({ ...prospect, fields: updatedFields });
+    
+    try {
+      await fetch(`/api/contacts/${rawPhone}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: updatedFields })
+      });
+    } catch (err) {
+      console.error("Error saving field:", err);
+    }
+  };
+
+  const handleStatusChange = async (stageId: string) => {
+    if (!prospect || !rawPhone) return;
+    try {
+      await fetch(`/api/contacts/${rawPhone}/stage`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage_id: stageId })
+      });
+      const stageName = stages.find(s => s.id === stageId)?.name;
+      if (stageName) {
+         setProspect({ ...prospect, leadStatus: stageName });
+      }
+    } catch (err) {
+      console.error("Error updating stage:", err);
+    }
+  };
+
+  const toggleEditAll = () => {
+    const allEditing = Object.values(editingFields).some(Boolean);
+    const newEditingFields: Record<string, boolean> = {};
+    if (!allEditing) {
+      prospect.fields.forEach(f => {
+        newEditingFields[f.label] = true;
+      });
+    }
+    setEditingFields(newEditingFields);
   };
 
   return (
@@ -276,18 +392,22 @@ export function ProspectProfile({
               isMobile && "justify-center flex-wrap w-full pt-2",
             )}
           >
-            {!readOnly && (
+            {!readOnly && stages.length > 0 && (
               <div className="flex flex-col gap-1.5">
                 <span className="text-xs text-gray-500">Lead Status</span>
-                <Select defaultValue={prospect.leadStatus}>
+                <Select
+                  value={stages.find(s => s.name === prospect.leadStatus)?.id || stages[0]?.id}
+                  onValueChange={handleStatusChange}
+                >
                   <SelectTrigger className="w-48 bg-blue-50 border-blue-200 text-blue-700">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="new">New Inquiry</SelectItem>
-                    <SelectItem value="active">Active Consulting</SelectItem>
-                    <SelectItem value="submitted">Application Submitted</SelectItem>
-                    <SelectItem value="enrolled">Enrolled</SelectItem>
+                    {stages.map((stage) => (
+                      <SelectItem key={stage.id} value={stage.id}>
+                        {stage.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -340,15 +460,22 @@ export function ProspectProfile({
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm text-gray-900 font-medium">Academic &amp; Enrollment Details</h2>
                 {!readOnly && (
-                  <Button variant="ghost" size="sm" className="text-blue-700">
+                  <Button variant="ghost" size="sm" className="text-blue-700" onClick={toggleEditAll}>
                     <Pencil className="w-3.5 h-3.5 mr-1" />
-                    Edit All
+                    {Object.values(editingFields).some(Boolean) ? "Done Editing" : "Edit All"}
                   </Button>
                 )}
               </div>
               <div className={cn("grid gap-4", isMobile ? "grid-cols-1" : "grid-cols-2")}>
                 {prospect.fields.map((f) => (
-                  <Field key={f.label} label={f.label} value={f.value} />
+                  <Field
+                    key={f.label}
+                    label={f.label}
+                    value={f.value}
+                    isEditing={!!editingFields[f.label]}
+                    onEditToggle={() => setEditingFields(prev => ({ ...prev, [f.label]: !prev[f.label] }))}
+                    onChange={(val) => handleFieldSave(f.label, val)}
+                  />
                 ))}
               </div>
             </section>

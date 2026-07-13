@@ -9,6 +9,7 @@ import { ProspectProfile } from "@/components/prospect-profile";
 import { SupervisorInbox } from "@/components/chat/supervisor-inbox";
 import { MessageSquareDashed } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { useSearchParams } from "next/navigation";
 
 type InboxMode = "personal" | "team";
 
@@ -16,12 +17,26 @@ function normalizePhoneNumber(phone: string) {
   return phone.replace(/\D/g, "");
 }
 
+function extractMessageContent(msg: any): string {
+  let text = msg.body || msg.content || msg.text || msg.message?.conversation || msg.message?.extendedTextMessage?.text;
+  if (!text) {
+    if (msg.message?.imageMessage) text = msg.message.imageMessage.caption || '[Image]';
+    else if (msg.message?.videoMessage) text = msg.message.videoMessage.caption || '[Video]';
+    else if (msg.message?.audioMessage) text = '[Voice/Audio]';
+    else if (msg.message?.documentMessage) text = msg.message.documentMessage.fileName || '[Document]';
+    else if (msg.type) text = msg.caption || `[${msg.type}]`;
+  }
+  return text || "";
+}
+
 export default function InboxPage() {
   const { role } = useAuth();
   const supabase = createClient();
+  const searchParams = useSearchParams();
+  const paramActiveId = searchParams.get("activeId");
 
-  const [activeId, setActiveId] = useState<string>("");
-  const [inboxMode, setInboxMode] = useState<InboxMode>("team");
+  const [activeId, setActiveId] = useState<string>(paramActiveId || "");
+  const [inboxMode, setInboxMode] = useState<InboxMode>(paramActiveId ? "personal" : "team");
   const [whatsappStatus, setWhatsappStatus] = useState<"DISCONNECTED" | "CONNECTED">("DISCONNECTED");
   const [sessionId, setSessionId] = useState<string>("");
   const [conversations, setConversations] = useState<any[]>([]);
@@ -37,17 +52,23 @@ export default function InboxPage() {
 
   useEffect(() => {
     const fetchCrmContacts = async () => {
-      const { data, error } = await supabase
-        .from("contacts")
-        .select("phone_number, crm_label")
-        .not("crm_label", "is", null);
-
-      if (!error && data) {
+      try {
+        const res = await fetch('/api/contacts/labels');
+        if (!res.ok) throw new Error('Failed to fetch CRM contacts');
+        
+        const data = await res.json();
         const mapping: Record<string, string> = {};
-        data.forEach(c => {
-          mapping[normalizePhoneNumber(c.phone_number)] = c.crm_label;
-        });
+        
+        if (Array.isArray(data)) {
+          data.forEach(c => {
+            if (c.phone_number && c.name) {
+              mapping[normalizePhoneNumber(c.phone_number)] = c.name;
+            }
+          });
+        }
         setCrmContacts(mapping);
+      } catch (err) {
+        console.error("Error fetching CRM contacts:", err);
       }
     };
     fetchCrmContacts();
@@ -85,9 +106,9 @@ export default function InboxPage() {
 
                 return [...prev, {
                   id: msg.id || msg.waMessageId || Date.now().toString(),
-                  content: msg.body || msg.content || "",
-                  sender: msg.fromMe || msg.direction === 'outgoing' ? "ambassador" : "student",
-                  timestamp: msg.timestamp
+                  content: extractMessageContent(msg),
+                  sender_type: msg.fromMe || msg.direction === 'outgoing' ? "ambassador" : "student",
+                  sent_at: msg.timestamp
                     ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                     : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                   isAutomated: false
@@ -101,7 +122,7 @@ export default function InboxPage() {
             const idx = copy.findIndex(c => c.id === msgChatId);
             if (idx > -1) {
               const updatedChat = { ...copy[idx] };
-              updatedChat.last_message_preview = msg.body || msg.content || "";
+              updatedChat.last_message_preview = extractMessageContent(msg);
               updatedChat.last_message_at = msg.timestamp
                 ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -123,7 +144,7 @@ export default function InboxPage() {
                 channel: "WhatsApp",
                 intent: "General",
                 unread_count: 1,
-                last_message_preview: msg.body || msg.content || "",
+                last_message_preview: extractMessageContent(msg),
                 last_message_at: msg.timestamp
                   ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                   : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -152,7 +173,7 @@ export default function InboxPage() {
 
             const mapped = sortedData.map((chat: any) => {
               const rawPhone = chat.id.split('@')[0];
-              const resolvedName = crmContacts[rawPhone] || chat.name || chat.pushname || rawPhone;
+              const resolvedName = crmContactsRef.current[rawPhone] || chat.name || chat.pushname || rawPhone;
               return {
                 id: chat.id,
                 student_name: resolvedName,
@@ -211,9 +232,9 @@ export default function InboxPage() {
 
             const mapped = sortedMessages.map((msg: any) => ({
               id: msg.id || msg.waMessageId,
-              content: msg.body,
-              sender: msg.direction === 'outgoing' ? 'ambassador' : 'student',
-              timestamp: msg.timestamp
+              content: extractMessageContent(msg),
+              sender_type: msg.direction === 'outgoing' ? 'ambassador' : 'student',
+              sent_at: msg.timestamp
                  ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                  : "",
               isAutomated: false
@@ -249,6 +270,7 @@ export default function InboxPage() {
           <ProspectProfile
             onBack={() => setShowProfile(false)}
             backLabel="Back to Team Overview"
+            rawPhone={activeId ? activeId.split('@')[0] : undefined}
           />
         ) : (
           <SupervisorInbox
@@ -298,6 +320,7 @@ export default function InboxPage() {
             onBack={() => setShowProfile(false)}
             backLabel="Back to Inbox"
             readOnly={role === "ambassador"}
+            rawPhone={activeId ? activeId.split('@')[0] : undefined}
           />
         ) : activeConversation ? (
           <ChatWorkspace
@@ -309,6 +332,36 @@ export default function InboxPage() {
             onOpenProfile={() => setShowProfile(true)}
             onContactUpdated={(rawPhone, newLabel) => {
               setCrmContacts(prev => ({ ...prev, [rawPhone]: newLabel }));
+            }}
+            onSendMessage={async (text) => {
+              const res = await fetch('/api/whatsapp/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId,
+                  chatId: activeConversation.id,
+                  text
+                })
+              });
+              if (!res.ok) {
+                throw new Error("Failed to send message");
+              }
+            }}
+            onSendMedia={async (fileBase64, fileName, caption) => {
+              const res = await fetch('/api/whatsapp/send-media', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId,
+                  chatId: activeConversation.id,
+                  fileBase64,
+                  fileName,
+                  caption
+                })
+              });
+              if (!res.ok) {
+                throw new Error("Failed to send media");
+              }
             }}
           />
         ) : (

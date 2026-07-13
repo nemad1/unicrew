@@ -58,9 +58,9 @@ export function ChatList({
             <p className="text-xs mt-1">New student messages will appear here.</p>
           </div>
         ) : (
-          conversations.map((c) => (
+          conversations.map((c, index) => (
             <button
-              key={c.id}
+              key={`${c.id}-${index}`}
               onClick={() => onSelect(c.id)}
               onDoubleClick={() => onOpen?.(c.id)}
               className={cn(

@@ -55,7 +55,7 @@ export function MessageBubble({ msg }: { msg: Message }) {
         {/* Bubble */}
         <div
           className={cn(
-            "rounded-lg px-4 py-2.5 text-sm leading-relaxed",
+            "whitespace-pre-wrap rounded-lg px-4 py-2.5 text-sm leading-relaxed",
             incoming
               ? "bg-gray-100 text-gray-900 rounded-tl-none"
               : msg.is_automated

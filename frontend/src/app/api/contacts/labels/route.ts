@@ -5,24 +5,21 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://localhost:54
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder_key';
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-export async function PUT(request: Request, { params }: { params: Promise<{ phone_number: string }> }) {
+export async function GET() {
   try {
-    const { phone_number } = await params;
-    const body = await request.json();
-    const { crm_label } = body;
-
     const { data, error } = await supabase
       .from('contacts')
-      .upsert({ phone_number, crm_label }, { onConflict: 'phone_number' })
-      .select('phone_number, crm_label, name')
-      .single();
+      .select('phone_number, name')
+      .not('name', 'is', null);
 
     if (error) {
+      console.error("Supabase fetch error:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, contact: data });
+    return NextResponse.json(data);
   } catch (error: any) {
+    console.error("API route error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

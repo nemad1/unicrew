@@ -1,55 +1,46 @@
+import { useState } from "react";
 import { Sparkles, X, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type Suggestion = {
-  tone: "Friendly" | "Formal" | "Concise";
-  toneClass: string;
+export type Suggestion = {
+  tone: string;
+  toneClass?: string;
   text: string;
 };
 
-const suggestions: Suggestion[] = [
-  {
-    tone: "Friendly",
-    toneClass: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    text:
-      "Hi! I'd be happy to help with that. The tuition deadline for Fall is August 15, and we do have flexible installment plans available if you need them. Let me know if you would like to connect with a student ambassador to go over the steps!",
-  },
-  {
-    tone: "Formal",
-    toneClass: "bg-blue-50 text-blue-700 border-blue-200",
-    text:
-      "Dear student, thank you for contacting admissions. Please note that the official tuition payment deadline for the Fall semester is scheduled for August 15, 2026. Detailed information regarding installment programs is attached for your review. Please let us know if you require ambassador assistance.",
-  },
-  {
-    tone: "Concise",
-    toneClass: "bg-gray-100 text-gray-700 border-gray-200",
-    text:
-      "Tuition for Fall is due August 15. Installment options are available (see document). I can connect you with an ambassador if you want to walk through the details.",
-  },
-];
+function getToneClass(tone: string) {
+  const t = tone.toLowerCase();
+  if (t === "friendly") return "bg-emerald-100 text-emerald-800 border-emerald-200 shadow-sm shadow-emerald-100/50";
+  if (t === "formal") return "bg-indigo-100 text-indigo-800 border-indigo-200 shadow-sm shadow-indigo-100/50";
+  return "bg-slate-100 text-slate-700 border-slate-200 shadow-sm shadow-slate-100/50";
+}
 
 function PopupContents({
   onClose,
   onUseReply,
   onEditReply,
   onRegenerate,
+  suggestions,
 }: {
   onClose: () => void;
   onUseReply: (text: string) => void;
-  onEditReply: (text: string) => void;
+  onEditReply?: (text: string) => void;
   onRegenerate: () => void;
+  suggestions: Suggestion[];
 }) {
   return (
     <>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-100">
+      <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 rounded-t-xl">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-blue-700" />
-          <span className="text-sm font-semibold text-gray-900">Suggested Replies</span>
+          <div className="w-6 h-6 rounded-md bg-blue-100 flex items-center justify-center">
+            <Sparkles className="w-3.5 h-3.5 text-blue-700" />
+          </div>
+          <span className="text-sm font-bold text-gray-900 tracking-tight">AI Draft Replies</span>
         </div>
         <button
           onClick={onClose}
-          className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600"
+          className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-white/60 transition-colors"
           aria-label="Close"
         >
           <X className="w-4 h-4" />
@@ -57,52 +48,73 @@ function PopupContents({
       </div>
 
       {/* Body */}
-      <div className="flex flex-col gap-3 p-4">
+      <div className="flex flex-col gap-3.5 p-4 max-h-[400px] overflow-y-auto">
         {suggestions.map((s) => (
-          <div
-            key={s.tone}
-            className="border border-gray-100 rounded-lg p-3 bg-[#fafafa] space-y-2.5"
-          >
-            <div>
-              <span
-                className={cn(
-                  "inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-medium",
-                  s.toneClass,
-                )}
-              >
-                {s.tone}
-              </span>
-            </div>
-            <p className="text-xs text-gray-700 leading-relaxed">{s.text}</p>
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                onClick={() => onUseReply(s.text)}
-                className="flex-1 text-xs font-medium text-white bg-blue-700 hover:bg-blue-800 rounded-md px-3 py-1.5 transition-colors"
-              >
-                Use this reply
-              </button>
-              <button
-                onClick={() => onEditReply(s.text)}
-                className="flex-1 text-xs font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 rounded-md px-3 py-1.5 transition-colors"
-              >
-                Edit before sending
-              </button>
-            </div>
-          </div>
+          <SuggestionCard 
+            key={s.tone} 
+            suggestion={s} 
+            onUseReply={onUseReply} 
+          />
         ))}
       </div>
 
       {/* Footer */}
-      <div className="p-4 border-t border-gray-100">
+      <div className="p-4 border-t border-gray-100 bg-gray-50/50 rounded-b-xl">
         <button
           onClick={onRegenerate}
-          className="w-full inline-flex items-center justify-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-100 rounded-md py-2 text-xs font-semibold hover:bg-blue-100 transition-colors"
+          className="w-full inline-flex items-center justify-center gap-1.5 bg-white text-gray-700 border border-gray-200 rounded-lg py-2.5 text-xs font-semibold shadow-sm hover:bg-gray-50 hover:text-blue-600 transition-all active:scale-[0.98]"
         >
-          <RefreshCw className="w-3 h-3" />
-          Regenerate suggestions
+          <RefreshCw className="w-3.5 h-3.5" />
+          Regenerate drafts
         </button>
       </div>
     </>
+  );
+}
+
+function SuggestionCard({ suggestion: s, onUseReply }: { suggestion: Suggestion; onUseReply: (text: string) => void }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [text, setText] = useState(s.text);
+
+  return (
+    <div className="border border-gray-200/60 rounded-xl p-3.5 bg-white shadow-sm hover:shadow-md transition-all duration-200 space-y-3">
+      <div>
+        <span
+          className={cn(
+            "inline-flex items-center px-2.5 py-0.5 rounded-full border text-[10px] font-semibold tracking-wide uppercase",
+            s.toneClass || getToneClass(s.tone),
+          )}
+        >
+          {s.tone}
+        </span>
+      </div>
+      
+      {isEditing ? (
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          className="w-full text-[13px] text-gray-800 leading-relaxed border border-blue-300 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 bg-blue-50/30 resize-none min-h-[90px] shadow-inner"
+          autoFocus
+        />
+      ) : (
+        <p className="text-[13px] text-gray-700 leading-relaxed min-h-[40px] whitespace-pre-wrap">{text}</p>
+      )}
+
+      <div className="flex items-center gap-2 pt-1.5">
+        <button
+          onClick={() => onUseReply(text)}
+          className="flex-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm hover:shadow-md hover:shadow-blue-600/20 rounded-lg px-3 py-2 transition-all active:scale-[0.98]"
+        >
+          Use this reply
+        </button>
+        <button
+          onClick={() => setIsEditing(!isEditing)}
+          className="flex-1 text-xs font-semibold text-gray-700 bg-white border border-gray-200 shadow-sm hover:bg-gray-50 hover:border-gray-300 rounded-lg px-3 py-2 transition-all active:scale-[0.98]"
+        >
+          {isEditing ? "Save edit" : "Edit draft"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -112,12 +124,14 @@ export function AISuggestedRepliesDesktop({
   onUseReply,
   onEditReply,
   onRegenerate,
+  suggestions,
 }: {
   open: boolean;
   onClose: () => void;
   onUseReply: (text: string) => void;
   onEditReply: (text: string) => void;
   onRegenerate: () => void;
+  suggestions: Suggestion[];
 }) {
   if (!open) return null;
   return (
@@ -133,8 +147,9 @@ export function AISuggestedRepliesDesktop({
       <PopupContents
         onClose={onClose}
         onUseReply={onUseReply}
-        onEditReply={onEditReply}
+        onEditReply={onEditReply || (() => {})}
         onRegenerate={onRegenerate}
+        suggestions={suggestions}
       />
     </div>
   );

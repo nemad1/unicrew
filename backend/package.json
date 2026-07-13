@@ -11,11 +11,15 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@supabase/supabase-js": "^2.110.1",
+    "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.110.2",
     "@whiskeysockets/baileys": "^7.0.0-rc13",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "node-cron": "^4.6.0",
+    "openai": "^6.46.0",
+    "pg": "^8.22.0",
     "pino": "^10.3.1",
     "qrcode": "^1.5.4"
   }

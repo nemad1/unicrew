@@ -3,6 +3,8 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const { getSessionStatus, fetchAllChats, getChatMessages } = require('./whatsappManager');
+const { analyzeContactProfile } = require('./aiService');
+const { startDailyAnalysisCron } = require('./cron/dailyAnalysis');
 
 dotenv.config();
 
@@ -55,20 +57,15 @@ app.post('/api/whatsapp/sync', async (req, res) => {
 
             const name = chat.name || chat.pushname || chat.formattedTitle || phoneNumber;
 
-            // Upsert contact (omitting crm_label to avoid overwriting it if it already exists)
+            // Only sync messages for contacts that already exist in the CRM
             const { data: contact, error: contactError } = await supabase
                 .from('contacts')
-                .upsert({ 
-                    phone_number: phoneNumber,
-                    name: name,
-                    channel: 'WhatsApp',
-                    unread_count: chat.unreadCount || 0
-                }, { onConflict: 'phone_number' })
-                .select('id')
+                .select('id, ai_summary, fields')
+                .eq('phone_number', phoneNumber)
                 .single();
             
-            if (contactError) {
-                console.error("Failed to upsert contact:", contactError);
+            if (contactError || !contact) {
+                // Unknown contact, skip syncing
                 continue;
             }
 
@@ -76,7 +73,7 @@ app.post('/api/whatsapp/sync', async (req, res) => {
             const msgs = await getChatMessages(chat.id, 5);
             for (const msg of msgs) {
                 // OpenWA message object has: id, body, fromMe, timestamp
-                const content = msg.body || msg.content || "";
+                const content = msg.body || msg.content || msg.text || msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
                 if (!content) continue;
 
                 const isFromMe = msg.fromMe !== undefined ? msg.fromMe : msg.direction === 'outgoing';
@@ -89,6 +86,66 @@ app.post('/api/whatsapp/sync', async (req, res) => {
                         content: content,
                         is_read: isFromMe || chat.unreadCount === 0
                     });
+            }
+
+            // Generate AI summary if missing
+            if (!contact.ai_summary) {
+                const { data: recentLogs } = await supabase
+                    .from('interaction_logs')
+                    .select('sender_type, content')
+                    .eq('contact_id', contact.id)
+                    .order('created_at', { ascending: true })
+                    .limit(10);
+                
+                if (recentLogs && recentLogs.length >= 2) {
+                    console.log(`[Sync AI] Generating background summary for ${phoneNumber}...`);
+                    const aiData = await analyzeContactProfile(contact.id, recentLogs);
+                    if (aiData) {
+                        let updatedFields = contact.fields || [
+                            { label: "Current High School", value: "" },
+                            { label: "Target Course", value: "" },
+                            { label: "Intended Intake", value: "" },
+                            { label: "Assigned Ambassador", value: "" },
+                            { label: "Assigned Counselor", value: "" },
+                            { label: "Source Channel", value: "WhatsApp" }
+                        ];
+
+                        if (aiData.fields) {
+                            for (const [key, value] of Object.entries(aiData.fields)) {
+                                if (value) {
+                                    const fieldIndex = updatedFields.findIndex(f => f.label === key);
+                                    if (fieldIndex >= 0) {
+                                        updatedFields[fieldIndex].value = value;
+                                    } else {
+                                        updatedFields.push({ label: key, value });
+                                    }
+                                }
+                            }
+                        }
+
+                        await supabase
+                            .from('contacts')
+                            .update({
+                                ai_summary: aiData.summary,
+                                ai_tags: aiData.tags || [],
+                                enrollment_probability: aiData.probability || 0,
+                                intent: aiData.intent || 'General',
+                                fields: updatedFields
+                            })
+                            .eq('id', contact.id);
+                        console.log(`[Sync AI] Updated profile for ${phoneNumber}`);
+
+                        if (aiData.timeline_update) {
+                            await supabase.from('interaction_logs').insert({
+                                contact_id: contact.id,
+                                sender_type: 'system',
+                                content: aiData.timeline_update,
+                                is_read: true,
+                                is_automated: true
+                            });
+                        }
+                    }
+                }
             }
         }
 
@@ -118,19 +175,28 @@ app.post('/webhook', async (req, res) => {
         const from = fromRaw ? fromRaw.split('@')[0] : 'Unknown';
         const body = data.body || data.content;
         const fromMe = data.fromMe;
+        let extractedBody = data.body || data.content || data.text || data.message?.conversation || data.message?.extendedTextMessage?.text;
 
-        if (from && body) {
-            // 1. Upsert contact
+        if (!extractedBody) {
+            if (data.message?.imageMessage) extractedBody = data.message.imageMessage.caption || '[Image]';
+            else if (data.message?.videoMessage) extractedBody = data.message.videoMessage.caption || '[Video]';
+            else if (data.message?.audioMessage) extractedBody = '[Voice/Audio]';
+            else if (data.message?.documentMessage) extractedBody = data.message.documentMessage.fileName || '[Document]';
+            else if (data.type) extractedBody = data.caption || `[${data.type}]`;
+        }
+
+        if (from && extractedBody) {
+            // 1. Check if contact exists in the CRM
             const { data: contact, error: contactError } = await supabase
                 .from('contacts')
-                .upsert({
-                    phone_number: from,
-                    name: data.sender?.pushname || data.sender?.name || from
-                }, { onConflict: 'phone_number' })
-                .select('id')
+                .select('id, ai_summary, fields')
+                .eq('phone_number', from)
                 .single();
 
-            if (contactError) throw contactError;
+            if (contactError || !contact) {
+                // Unknown contact, silently ignore
+                return res.status(200).send('Webhook processed (ignored unknown contact)');
+            }
 
             // 2. Insert message
             const { error: msgError } = await supabase
@@ -138,11 +204,81 @@ app.post('/webhook', async (req, res) => {
                 .insert({
                     contact_id: contact.id,
                     sender_type: fromMe ? 'ambassador' : 'student',
-                    content: body
+                    content: extractedBody
                 });
 
             if (msgError) throw msgError;
             console.log(`Saved incoming message from ${from}`);
+
+            // 3. Trigger AI Analysis for new contacts asynchronously
+            (async () => {
+                try {
+                    const { count } = await supabase
+                        .from('interaction_logs')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('contact_id', contact.id);
+
+                    if (count === 3 || count === 5 || (!contact.ai_summary && count > 2)) {
+                        const { data: recentLogs } = await supabase
+                            .from('interaction_logs')
+                            .select('sender_type, content')
+                            .eq('contact_id', contact.id)
+                            .order('created_at', { ascending: true })
+                            .limit(15);
+                        
+                        if (recentLogs) {
+                            const aiData = await analyzeContactProfile(contact.id, recentLogs);
+                            if (aiData) {
+                                let updatedFields = contact.fields || [
+                                    { label: "Current High School", value: "" },
+                                    { label: "Target Course", value: "" },
+                                    { label: "Intended Intake", value: "" },
+                                    { label: "Assigned Ambassador", value: "" },
+                                    { label: "Assigned Counselor", value: "" },
+                                    { label: "Source Channel", value: "WhatsApp" }
+                                ];
+
+                                if (aiData.fields) {
+                                    for (const [key, value] of Object.entries(aiData.fields)) {
+                                        if (value) {
+                                            const fieldIndex = updatedFields.findIndex(f => f.label === key);
+                                            if (fieldIndex >= 0) {
+                                                updatedFields[fieldIndex].value = value;
+                                            } else {
+                                                updatedFields.push({ label: key, value });
+                                            }
+                                        }
+                                    }
+                                }
+
+                                await supabase
+                                    .from('contacts')
+                                    .update({
+                                        ai_summary: aiData.summary,
+                                        ai_tags: aiData.tags || [],
+                                        enrollment_probability: aiData.probability || 0,
+                                        intent: aiData.intent || 'General',
+                                        fields: updatedFields
+                                    })
+                                    .eq('id', contact.id);
+                                console.log(`[Webhook AI] Updated profile for ${from}`);
+
+                                if (aiData.timeline_update) {
+                                    await supabase.from('interaction_logs').insert({
+                                        contact_id: contact.id,
+                                        sender_type: 'system',
+                                        content: aiData.timeline_update,
+                                        is_read: true,
+                                        is_automated: true
+                                    });
+                                }
+                            }
+                        }
+                    }
+                } catch (aiErr) {
+                    console.error('[Webhook AI] Background analysis error:', aiErr);
+                }
+            })();
         }
     }
 
@@ -158,7 +294,7 @@ app.post('/webhook', async (req, res) => {
 // ==========================================
 app.put('/api/contacts/:phone_number/label', async (req, res) => {
     const { phone_number } = req.params;
-    const { crm_label } = req.body;
+    const { name } = req.body;
 
     if (!phone_number) {
         return res.status(400).json({ error: 'phone_number is required' });
@@ -168,8 +304,8 @@ app.put('/api/contacts/:phone_number/label', async (req, res) => {
         // Upsert to ensure we create the contact row if it doesn't exist
         const { data, error } = await supabase
             .from('contacts')
-            .upsert({ phone_number, crm_label }, { onConflict: 'phone_number' })
-            .select('phone_number, crm_label, name')
+            .upsert({ phone_number, name }, { onConflict: 'phone_number' })
+            .select('phone_number, name')
             .single();
 
         if (error) throw error;
@@ -180,6 +316,9 @@ app.put('/api/contacts/:phone_number/label', async (req, res) => {
         res.status(500).json({ error: "Internal Error" });
     }
 });
+
+// Start background cron jobs
+startDailyAnalysisCron();
 
 app.listen(PORT, () => {
   console.log(`Backend API server running on http://localhost:${PORT}`);

@@ -48,6 +48,8 @@ export type Conversation = {
   channel: Channel;
   /** Number of unread messages (0 = read) */
   unread_count: number;
+  /** Status in the sales pipeline */
+  lead_status?: "new" | "active" | "submitted" | "enrolled";
 };
 
 /**

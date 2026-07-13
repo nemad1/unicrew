@@ -17,6 +17,7 @@ import {
   Pencil,
   Palette,
   Trash2,
+  MessageCircle,
 } from "lucide-react";
 import {
   DndContext,
@@ -35,6 +36,7 @@ import {
   useSortable,
   arrayMove,
   verticalListSortingStrategy,
+  horizontalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Input } from "@/components/ui/input";
@@ -60,12 +62,17 @@ import { cn } from "@/lib/utils";
 import { intentStyles } from "@/types/roles";
 import type { Intent } from "@/types/roles";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { ExpandedChatView } from "@/components/chat/expanded-chat";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { ProspectProfile } from "@/components/prospect-profile";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type Deal = {
   id: string;
+  contactId: string;
+  phone: string;
   name: string;
   time: string;
   intent: Intent;
@@ -92,133 +99,7 @@ const accentColors = [
   { hex: "#db2777", label: "Pink" },
 ];
 
-const initialColumns: Column[] = [
-  {
-    id: "new",
-    title: "New Inquiry",
-    accent: "#1d4ed8",
-    deals: [
-      {
-        id: "n1",
-        name: "Aisha Binte Rahman",
-        time: "Just now",
-        intent: "Fees",
-        preview: "Could you share the scholarship deadlines for spring intake?",
-        ambassador: { name: "Hana", initials: "HK" },
-      },
-      {
-        id: "n2",
-        name: "Carlos Mendoza",
-        time: "12m ago",
-        intent: "Visa & Immigration",
-        preview: "Do I need a financial affidavit before the I-20 is issued?",
-        ambassador: { name: "Ravi", initials: "RP" },
-      },
-      {
-        id: "n3",
-        name: "Priya Nair",
-        time: "47m ago",
-        intent: "Campus Life",
-        preview: "Are there pre-arrival events for international freshmen?",
-        ambassador: { name: "Mia", initials: "ML" },
-      },
-      {
-        id: "n4",
-        name: "Tomás Álvarez",
-        time: "2h ago",
-        intent: "Fees",
-        preview: "Is the application fee waived for early decision applicants?",
-        ambassador: { name: "Sara", initials: "SO" },
-      },
-    ],
-  },
-  {
-    id: "active",
-    title: "Active Consulting",
-    accent: "#d97706",
-    deals: [
-      {
-        id: "a1",
-        name: "Yuki Tanaka",
-        time: "5m ago",
-        intent: "Visa & Immigration",
-        preview: "Sent over the bank statements — please confirm receipt.",
-        ambassador: { name: "Hana", initials: "HK" },
-      },
-      {
-        id: "a2",
-        name: "Marco Bianchi",
-        time: "1h ago",
-        intent: "Campus Life",
-        preview: "Looking into housing options near the engineering campus.",
-        ambassador: { name: "Ravi", initials: "RP" },
-      },
-      {
-        id: "a3",
-        name: "Liam O'Connor",
-        time: "3h ago",
-        intent: "Escalated",
-        preview: "Need a callback regarding the credit transfer evaluation.",
-        ambassador: { name: "Sara", initials: "SO" },
-      },
-    ],
-  },
-  {
-    id: "submitted",
-    title: "Application Submitted",
-    accent: "#7c3aed",
-    deals: [
-      {
-        id: "s1",
-        name: "Sofia Hernández",
-        time: "Yesterday",
-        intent: "Booking",
-        preview: "Booked an interview slot for next Tuesday afternoon.",
-        ambassador: { name: "Mia", initials: "ML" },
-      },
-      {
-        id: "s2",
-        name: "Daniel Müller",
-        time: "Yesterday",
-        intent: "Fees",
-        preview: "Uploaded the proof of funds — awaiting confirmation.",
-        ambassador: { name: "Hana", initials: "HK" },
-      },
-    ],
-  },
-  {
-    id: "enrolled",
-    title: "Enrolled",
-    accent: "#059669",
-    completed: true,
-    deals: [
-      {
-        id: "e1",
-        name: "Mei Lin Zhao",
-        time: "2d ago",
-        intent: "Booking",
-        preview: "Confirmed orientation week attendance and dorm move-in.",
-        ambassador: { name: "Ravi", initials: "RP" },
-      },
-      {
-        id: "e2",
-        name: "Olivia Bennett",
-        time: "3d ago",
-        intent: "Campus Life",
-        preview: "Excited to join — any reading list for the first term?",
-        ambassador: { name: "Mia", initials: "ML" },
-      },
-      {
-        id: "e3",
-        name: "Noah Williams",
-        time: "5d ago",
-        intent: "Fees",
-        preview: "Tuition deposit cleared. Looking forward to the semester!",
-        ambassador: { name: "Sara", initials: "SO" },
-      },
-    ],
-  },
-];
+// Replaced by real data
 
 const ambassadors = [
   { name: "Hana", initials: "HK" },
@@ -353,16 +234,6 @@ function CardOptionsMenu({
         >
           <User className="w-3.5 h-3.5 text-gray-500 shrink-0" />
           <span>View student profile</span>
-        </button>
-
-        {/* Add note */}
-        <button
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
-          onMouseEnter={() => onSetSubMenu(null)}
-          onClick={() => { onAddNote(menu.dealId); onClose(); }}
-        >
-          <FileText className="w-3.5 h-3.5 text-gray-500 shrink-0" />
-          <span>Add note</span>
         </button>
 
         <div className="my-1 h-px bg-gray-100" />
@@ -527,6 +398,7 @@ function DealCardContent({
   onOpen,
   ghost,
   onOpenMenu,
+  onMessage,
 }: {
   deal: Deal;
   completed?: boolean;
@@ -534,6 +406,7 @@ function DealCardContent({
   onOpen?: () => void;
   ghost?: boolean;
   onOpenMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  onMessage?: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <div
@@ -571,12 +444,21 @@ function DealCardContent({
           </span>
           <span className="text-xs text-gray-600">{deal.ambassador.name}</span>
         </div>
-        <button
-          onClick={(e) => { e.stopPropagation(); onOpenMenu?.(e); }}
-          className="text-gray-400 hover:text-gray-600 p-1 rounded"
-        >
-          <MoreVertical className="w-4 h-4" />
-        </button>
+        <div className="flex gap-1">
+          <button
+            onClick={(e) => { e.stopPropagation(); onMessage?.(e); }}
+            className="text-gray-400 hover:text-blue-600 p-1 rounded transition-colors"
+            title="Message in Inbox"
+          >
+            <MessageCircle className="w-4 h-4" />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpenMenu?.(e); }}
+            className="text-gray-400 hover:text-gray-600 p-1 rounded transition-colors"
+          >
+            <MoreVertical className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -588,12 +470,14 @@ function SortableDealCard({
   completed,
   onOpen,
   onOpenMenu,
+  onMessage,
 }: {
   deal: Deal;
   colId: string;
   completed?: boolean;
   onOpen?: () => void;
   onOpenMenu: (dealId: string, colId: string, e: React.MouseEvent<HTMLButtonElement>) => void;
+  onMessage?: (dealId: string, colId: string, e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: deal.id, data: { type: "deal", deal } });
@@ -611,6 +495,7 @@ function SortableDealCard({
         ghost={isDragging}
         onOpen={onOpen}
         onOpenMenu={(e) => onOpenMenu(deal.id, colId, e)}
+        onMessage={(e) => onMessage?.(deal.id, colId, e)}
       />
     </div>
   );
@@ -618,7 +503,7 @@ function SortableDealCard({
 
 // ─── Droppable Column ─────────────────────────────────────────────────────────
 
-function DroppableColumn({
+function SortableColumn({
   column,
   children,
   onOpenColMenu,
@@ -628,17 +513,19 @@ function DroppableColumn({
   onOpenColMenu: (colId: string, e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const isMobile = useMediaQuery("(max-width: 767px)");
-  const { setNodeRef, isOver } = useDroppable({
+  
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
     id: column.id,
-    data: { type: "column" },
+    data: { type: "column", column },
   });
 
   return (
     <div
       ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(
         "border border-gray-200 rounded-lg flex flex-col min-h-0 transition-colors overflow-hidden",
-        isOver ? "bg-blue-50/60 border-blue-200" : "bg-gray-50",
+        isDragging ? "opacity-50 ring-2 ring-blue-500" : "bg-gray-50",
         isMobile && "min-w-[85vw] snap-center shrink-0"
       )}
     >
@@ -646,7 +533,11 @@ function DroppableColumn({
       <div className="h-[3px] shrink-0" style={{ backgroundColor: column.accent }} />
 
       {/* Header */}
-      <div className="px-4 py-3 flex items-center gap-2 border-b border-gray-200/70">
+      <div 
+        className="px-4 py-3 flex items-center gap-2 border-b border-gray-200/70 cursor-grab"
+        {...attributes}
+        {...listeners}
+      >
         <span className="text-sm text-gray-900 font-medium flex-1 truncate">{column.title}</span>
         <span className="inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full bg-white border border-gray-200 text-xs text-gray-600 shrink-0">
           {column.deals.length}
@@ -853,7 +744,7 @@ function ColorPickerModal({
           <h3 className="text-sm font-semibold text-gray-900">Column color</h3>
           <button onClick={onCancel}><X className="w-4 h-4 text-gray-400" /></button>
         </div>
-        <div className="flex gap-3 justify-center">
+        <div className="flex flex-wrap gap-3 justify-center">
           {accentColors.map((c) => (
             <button
               key={c.hex}
@@ -866,7 +757,16 @@ function ColorPickerModal({
             </button>
           ))}
         </div>
-        <div className="flex gap-2 justify-end">
+        <div className="flex items-center gap-3 pt-2">
+          <label className="text-xs text-gray-600 flex-1">Custom color:</label>
+          <input
+            type="color"
+            value={selected}
+            onChange={(e) => setSelected(e.target.value)}
+            className="w-8 h-8 p-0 border-0 rounded cursor-pointer shrink-0"
+          />
+        </div>
+        <div className="flex gap-2 justify-end pt-2">
           <button onClick={onCancel} className="text-xs text-gray-600 border border-gray-200 rounded-md px-3 py-1.5 hover:bg-gray-50">Cancel</button>
           <button
             onClick={() => onConfirm(selected)}
@@ -891,13 +791,19 @@ export function KanbanBoard({
   /** Mobile: opens the Customer (Student Prospect) profile for a tapped card. */
   onOpenProfile?: (deal: { name: string; intent: Intent; preview: string }) => void;
 }) {
+  const router = useRouter();
   const [expandedDeal, setExpandedDeal] = useState<Deal | null>(null);
+  const [profileSheetOpen, setProfileSheetOpen] = useState(false);
 
-  const openCard = (deal: Deal) => setExpandedDeal(deal);
+  const openCard = (deal: Deal) => {
+    setExpandedDeal(deal);
+    setProfileSheetOpen(true);
+  };
   const isMobile = useMediaQuery("(max-width: 767px)");
-  const [columns, setColumns] = useState<Column[]>(initialColumns);
+  const [columns, setColumns] = useState<Column[]>([]);
   const [activeFilter, setActiveFilter] = useState("All Intents");
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
+  const [activeColumn, setActiveColumn] = useState<Column | null>(null);
 
   // New deal dialog
   const [newDealOpen, setNewDealOpen] = useState(false);
@@ -921,8 +827,22 @@ export function KanbanBoard({
   // Skeleton loading
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 450);
-    return () => clearTimeout(t);
+    async function fetchBoard() {
+      try {
+        const res = await fetch('/api/kanban/board');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.columns) {
+            setColumns(data.columns);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch kanban board:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchBoard();
   }, []);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -938,6 +858,8 @@ export function KanbanBoard({
     const ambassador = ambassadors.find((a) => a.name === formAmbassador) ?? ambassadors[0];
     const newDeal: Deal = {
       id: `nd-${Date.now()}`,
+      contactId: `c-${Date.now()}`,
+      phone: "0000000000",
       name: formName.trim(),
       time: "Just now",
       intent: formIntent,
@@ -951,15 +873,27 @@ export function KanbanBoard({
     resetForm();
   };
 
-  const handleCreateStage = (title: string, accent: string) => {
-    const newCol: Column = {
-      id: `custom-${Date.now()}`,
-      title,
-      accent,
-      isCustom: true,
-      deals: [],
-    };
-    setColumns((prev) => [...prev, newCol]);
+  const handleCreateStage = async (title: string, accent: string) => {
+    try {
+      const res = await fetch('/api/kanban/stages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: title, accent_color: accent, order_index: columns.length })
+      });
+      const data = await res.json();
+      if (data.success) {
+        const newCol: Column = {
+          id: data.stage.id,
+          title: data.stage.name,
+          accent: data.stage.accent_color,
+          isCustom: true,
+          deals: [],
+        };
+        setColumns((prev) => [...prev, newCol]);
+      }
+    } catch (e) {
+      console.error(e);
+    }
     setAddingStage(false);
   };
 
@@ -967,13 +901,25 @@ export function KanbanBoard({
     setColumns((prev) => {
       const next = prev.map((c) => ({ ...c, deals: [...c.deals] }));
       let deal: Deal | undefined;
+      let sourceColId: string | undefined;
       for (const col of next) {
         const idx = col.deals.findIndex((d) => d.id === dealId);
-        if (idx !== -1) { [deal] = col.deals.splice(idx, 1); break; }
+        if (idx !== -1) { [deal] = col.deals.splice(idx, 1); sourceColId = col.id; break; }
       }
-      if (!deal) return prev;
+      if (!deal || sourceColId === targetColId) return prev;
       const target = next.find((c) => c.id === targetColId);
       target?.deals.push(deal);
+      
+      // Persist movement to backend
+      fetch('/api/kanban/cards/move', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ card_id: dealId, new_stage_id: targetColId })
+      }).catch(err => {
+        console.error(err);
+        toast.error("Failed to update stage on server.");
+      });
+
       return next;
     });
   }, []);
@@ -1022,6 +968,10 @@ export function KanbanBoard({
   const findColumnById = (id: string) => columns.find((c) => c.id === id);
 
   const handleDragStart = (event: DragStartEvent) => {
+    if (event.active.data.current?.type === "column") {
+      setActiveColumn(event.active.data.current.column);
+      return;
+    }
     const dealId = String(event.active.id);
     const col = findColumnByDealId(dealId);
     setActiveDeal(col?.deals.find((d) => d.id === dealId) ?? null);
@@ -1030,6 +980,8 @@ export function KanbanBoard({
   const handleDragOver = (event: DragOverEvent) => {
     const { active, over } = event;
     if (!over) return;
+    if (active.data.current?.type === "column") return;
+
     const activeId = String(active.id);
     const overId = String(over.id);
     if (activeId === overId) return;
@@ -1057,9 +1009,52 @@ export function KanbanBoard({
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveDeal(null);
+    setActiveColumn(null);
     if (!over) return;
+    
+    if (active.data.current?.type === "column") {
+      const activeId = String(active.id);
+      const overId = String(over.id);
+      if (activeId === overId) return;
+      
+      setColumns((prev) => {
+        const oldIndex = prev.findIndex((c) => c.id === activeId);
+        const newIndex = prev.findIndex((c) => c.id === overId);
+        const newColumns = arrayMove(prev, oldIndex, newIndex);
+        
+        // Optimistically sync to backend
+        fetch('/api/kanban/stages/reorder', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            stages: newColumns.map((col, index) => ({ id: col.id, order_index: index })) 
+          })
+        }).catch(err => {
+          console.error(err);
+          toast.error("Failed to reorder columns.");
+        });
+        
+        return newColumns;
+      });
+      return;
+    }
+    
     const activeId = String(active.id);
     const overId = String(over.id);
+    
+    // Synchronize to backend if the card was moved to a new column
+    const currentColumn = findColumnByDealId(activeId);
+    if (currentColumn) {
+       fetch('/api/kanban/cards/move', {
+         method: 'PUT',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ card_id: activeId, new_stage_id: currentColumn.id })
+       }).catch(err => {
+          console.error(err);
+          toast.error("Failed to move card.");
+       });
+    }
+
     if (activeId === overId) return;
     const sourceCol = findColumnByDealId(activeId);
     if (!sourceCol) return;
@@ -1080,15 +1075,7 @@ export function KanbanBoard({
   const columnIds = useMemo(() => columns.map((c) => c.id), [columns]);
   const gridCols = columns.length + (addingStage ? 1 : 1); // +1 for Add Stage card/form
 
-  if (expandedDeal) {
-    return (
-      <ExpandedChatView
-        deal={expandedDeal}
-        onBack={() => setExpandedDeal(null)}
-        onOpenProfile={() => {}}
-      />
-    );
-  }
+
 
   return (
     <div className={cn("flex-1 flex flex-col bg-white min-w-0", isMobile && "bg-gray-50")}>
@@ -1168,29 +1155,32 @@ export function KanbanBoard({
               onDragOver={handleDragOver}
               onDragEnd={handleDragEnd}
             >
-              {columns.map((col) => (
-                <DroppableColumn
-                  key={col.id}
-                  column={col}
-                  onOpenColMenu={handleOpenColMenu}
-                >
-                  <SortableContext
-                    items={col.deals.map((d) => d.id)}
-                    strategy={verticalListSortingStrategy}
+              <SortableContext items={columnIds} strategy={horizontalListSortingStrategy}>
+                {columns.map((col) => (
+                  <SortableColumn
+                    key={col.id}
+                    column={col}
+                    onOpenColMenu={handleOpenColMenu}
                   >
-                    {col.deals.map((deal) => (
-                      <SortableDealCard
-                        key={deal.id}
-                        deal={deal}
-                        colId={col.id}
-                        completed={col.completed}
-                        onOpen={() => openCard(deal)}
-                        onOpenMenu={handleOpenCardMenu}
-                      />
-                    ))}
-                  </SortableContext>
-                </DroppableColumn>
-              ))}
+                    <SortableContext
+                      items={col.deals.map((d) => d.id)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      {col.deals.map((deal) => (
+                        <SortableDealCard
+                          key={deal.id}
+                          deal={deal}
+                          colId={col.id}
+                          completed={col.completed}
+                          onOpen={() => openCard(deal)}
+                          onOpenMenu={handleOpenCardMenu}
+                          onMessage={() => router.push(`/inbox?activeId=${deal.phone.replace(/\D/g, '')}@c.us`)}
+                        />
+                      ))}
+                    </SortableContext>
+                  </SortableColumn>
+                ))}
+              </SortableContext>
 
               <DragOverlay>
                 {activeDeal ? <DealCardContent deal={activeDeal} dragging /> : null}
@@ -1222,10 +1212,9 @@ export function KanbanBoard({
           onAssignAmbassador={handleAssignAmbassador}
           onViewProfile={(id) => {
             const deal = columns.flatMap((c) => c.deals).find((d) => d.id === id);
-            if (deal && onOpenProfile) onOpenProfile(deal);
-            else onOpenDeal?.(id);
+            if (deal) openCard(deal);
           }}
-          onAddNote={() => {}}
+          onAddNote={(id) => toast.info("Notes feature coming soon")}
           onArchive={handleArchive}
           onSetSubMenu={(sub) => setCardMenu((m) => m ? { ...m, subMenu: sub } : null)}
         />
@@ -1245,9 +1234,29 @@ export function KanbanBoard({
             const col = columns.find((c) => c.id === colMenu.colId);
             if (col) setColorModal({ colId: col.id, accent: col.accent });
           }}
-          onDelete={() =>
-            setColumns((prev) => prev.filter((c) => c.id !== colMenu.colId))
-          }
+          onDelete={() => {
+            const colId = colMenu.colId;
+            // Optimistic check first
+            const col = columns.find(c => c.id === colId);
+            if (col && col.deals.length > 0) {
+               toast.error(`Cannot delete stage because it contains ${col.deals.length} card(s). Move them first.`);
+               return;
+            }
+            
+            setColumns((prev) => prev.filter((c) => c.id !== colId));
+            
+            fetch(`/api/kanban/stages/${colId}`, { method: 'DELETE' })
+              .then(async (res) => {
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                  toast.error(data.error || "Failed to delete stage.");
+                  // Revert if needed (simplified here)
+                } else {
+                  toast.success("Stage deleted.");
+                }
+              })
+              .catch(() => toast.error("Failed to delete stage."));
+          }}
         />
       )}
 
@@ -1257,9 +1266,16 @@ export function KanbanBoard({
         initial={renameModal?.title ?? ""}
         onConfirm={(name) => {
           if (renameModal) {
+            const colId = renameModal.colId;
             setColumns((prev) =>
-              prev.map((c) => (c.id === renameModal.colId ? { ...c, title: name } : c)),
+              prev.map((c) => (c.id === colId ? { ...c, title: name } : c)),
             );
+            
+            fetch(`/api/kanban/stages/${colId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name })
+            }).catch(() => toast.error("Failed to rename stage."));
           }
           setRenameModal(null);
         }}
@@ -1272,9 +1288,16 @@ export function KanbanBoard({
         initial={colorModal?.accent ?? accentColors[0].hex}
         onConfirm={(hex) => {
           if (colorModal) {
+            const colId = colorModal.colId;
             setColumns((prev) =>
-              prev.map((c) => (c.id === colorModal.colId ? { ...c, accent: hex } : c)),
+              prev.map((c) => (c.id === colId ? { ...c, accent: hex } : c)),
             );
+            
+            fetch(`/api/kanban/stages/${colId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ accent_color: hex })
+            }).catch(() => toast.error("Failed to update stage color."));
           }
           setColorModal(null);
         }}
@@ -1339,6 +1362,22 @@ export function KanbanBoard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* Prospect Profile Sheet */}
+      <Sheet open={profileSheetOpen} onOpenChange={(open) => {
+        setProfileSheetOpen(open);
+        if (!open) setExpandedDeal(null);
+      }}>
+        <SheetContent side="right" className="w-full sm:max-w-[550px] p-0 overflow-hidden bg-gray-50 border-l border-gray-200">
+          <SheetTitle className="sr-only">Prospect Profile</SheetTitle>
+          <SheetDescription className="sr-only">Details of the prospect.</SheetDescription>
+          {expandedDeal && (
+            <div className="h-full overflow-y-auto">
+              <ProspectProfile rawPhone={expandedDeal.phone} onBack={() => setProfileSheetOpen(false)} />
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

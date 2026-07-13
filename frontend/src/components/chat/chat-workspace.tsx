@@ -12,12 +12,16 @@ import {
   ExternalLink,
   Edit2,
   Check,
-  X
+  X,
+  UserPlus,
+  Loader2
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AISuggestedRepliesDesktop } from "./ai-suggested-replies";
+import { ContactDetailsModal } from "./contact-details-modal";
+import { ScheduleAppointmentModal } from "./schedule-appointment-modal";
 import { MessageBubble } from "./message-bubble";
 import { WhatsAppIcon, InstagramIcon } from "@/components/icons/channel-icons";
 import type { Message, Conversation, SenderType } from "@/types/messages";
@@ -38,6 +42,8 @@ export type ChatWorkspaceProps = {
   onEscalate?: () => void;
   suggestedFact?: string;
   onContactUpdated?: (rawPhone: string, newLabel: string) => void;
+  onSendMessage?: (text: string) => Promise<void>;
+  onSendMedia?: (fileBase64: string, fileName: string, caption?: string) => Promise<void>;
 };
 
 function nowTime() {
@@ -53,16 +59,60 @@ export function ChatWorkspace({
   onEscalate,
   suggestedFact,
   onContactUpdated,
+  onSendMessage,
+  onSendMedia,
 }: ChatWorkspaceProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [draft, setDraft] = useState("");
   const [aiSuggestionsOpen, setAiSuggestionsOpen] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState<import("./ai-suggested-replies").Suggestion[]>([]);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [showFact, setShowFact] = useState(!!suggestedFact);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   const [isEditingContact, setIsEditingContact] = useState(false);
-  const [editContactName, setEditContactName] = useState("");
+  const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const supabase = createClient();
+
+  const handleGenerateDraft = async () => {
+    setIsGeneratingDraft(true);
+    try {
+      const studentMsgs = messages.filter((m) => m.sender_type === "student");
+      const lastMessage = studentMsgs[studentMsgs.length - 1]?.content || "Hello";
+      
+      const res = await fetch("/api/ai/draft-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: lastMessage,
+          conversationHistory: messages.slice(-10),
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to generate draft");
+      const data = await res.json();
+      if (data.replies && Array.isArray(data.replies)) {
+        setAiSuggestions(data.replies);
+        setAiSuggestionsOpen(true);
+      } else {
+        toast.error("Could not generate a reply.");
+      }
+    } catch (err) {
+      toast.error("Failed to generate AI reply.");
+    } finally {
+      setIsGeneratingDraft(false);
+    }
+  };
+
+  const onAiDraftClick = () => {
+    if (aiSuggestions.length > 0) {
+      setAiSuggestionsOpen(true);
+    } else {
+      handleGenerateDraft();
+    }
+  };
 
   // Sync messages when the conversation changes
   useEffect(() => {
@@ -75,48 +125,73 @@ export function ChatWorkspace({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
 
-  const handleSaveContact = async () => {
-    if (!conversation || !conversation.id) return;
-    const rawPhone = conversation.id.split('@')[0];
-    const newLabel = editContactName.trim() || null;
-
-    try {
-      const res = await fetch(`/api/contacts/${rawPhone}/label`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ crm_label: newLabel })
-      });
-
-      if (res.ok) {
-        toast.success("Contact label updated");
-        setIsEditingContact(false);
-        if (onContactUpdated) {
-          onContactUpdated(rawPhone, newLabel || "");
-        }
-      } else {
-        toast.error("Failed to update contact label");
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("Error updating contact label");
-    }
-  };
-
-  const send = (text: string) => {
+  const send = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     
     // Assume sender is the current role
     const senderType: SenderType = role === "ambassador" ? "ambassador" : "counselor";
 
+    const tempId = `out-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
-      { id: `out-${Date.now()}`, sender_type: senderType, content: trimmed, sent_at: nowTime(), is_automated: false },
+      { id: tempId, sender_type: senderType, content: trimmed, sent_at: nowTime(), is_automated: false },
     ]);
     setDraft("");
+
+    if (onSendMessage) {
+      try {
+        await onSendMessage(trimmed);
+      } catch (err) {
+        toast.error("Failed to send message.");
+        setMessages((prev) => prev.filter(m => m.id !== tempId));
+      }
+    }
   };
 
   const handleSend = () => send(draft);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // Reset input
+    e.target.value = "";
+    
+    // Read file
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64 = event.target?.result as string;
+      if (!base64) return;
+      
+      setIsUploading(true);
+      const tempId = `out-media-${Date.now()}`;
+      const isImage = file.type.startsWith('image/');
+      const placeholder = isImage ? `[Image: ${file.name}]` : `[File: ${file.name}]`;
+      const caption = draft.trim();
+      
+      const senderType: SenderType = role === "ambassador" ? "ambassador" : "counselor";
+      setMessages((prev) => [
+        ...prev,
+        { id: tempId, sender_type: senderType, content: caption ? `${placeholder} - ${caption}` : placeholder, sent_at: nowTime(), is_automated: false },
+      ]);
+      
+      if (onSendMedia) {
+         try {
+           await onSendMedia(base64, file.name, caption || undefined);
+           if (caption) setDraft(""); // clear draft if used as caption
+         } catch(err) {
+           toast.error("Failed to send media.");
+           setMessages((prev) => prev.filter(m => m.id !== tempId));
+         }
+      } else {
+         toast.error("Media sending not configured.");
+         setMessages((prev) => prev.filter(m => m.id !== tempId));
+      }
+      setIsUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
 
   // ── Header right-side actions ───────────────────────────────────────────
   const headerActions =
@@ -167,26 +242,29 @@ export function ChatWorkspace({
             variant="outline"
             size="sm"
             className="border-gray-200 text-gray-700"
-            onClick={() => setAiSuggestionsOpen((o) => !o)}
+            onClick={onAiDraftClick}
+            disabled={isGeneratingDraft}
           >
-            <Sparkles className="w-3.5 h-3.5 mr-1.5 text-blue-700" />
+            {isGeneratingDraft ? (
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 text-blue-700 animate-spin" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5 mr-1.5 text-blue-700" />
+            )}
             AI Draft Reply
           </Button>
           <AISuggestedRepliesDesktop
             open={aiSuggestionsOpen}
             onClose={() => setAiSuggestionsOpen(false)}
+            suggestions={aiSuggestions}
             onUseReply={(text) => {
-              setMessages((prev) => [
-                ...prev,
-                { id: `counselor-${Date.now()}`, sender_type: "counselor", content: text, sent_at: nowTime(), is_automated: false },
-              ]);
+              setDraft(text);
               setAiSuggestionsOpen(false);
             }}
             onEditReply={(text) => {
               setDraft(text);
               setAiSuggestionsOpen(false);
             }}
-            onRegenerate={() => toast.loading("Regenerating suggestions…", { duration: 1500 })}
+            onRegenerate={handleGenerateDraft}
           />
         </div>
         <Button
@@ -202,7 +280,7 @@ export function ChatWorkspace({
           variant="outline"
           size="sm"
           className="border-gray-200 text-gray-700"
-          onClick={() => toast("Opening appointment scheduler…")}
+          onClick={() => setIsScheduleModalOpen(true)}
         >
           <CalendarPlus className="w-3.5 h-3.5 mr-1.5 text-blue-700" />
           Schedule Appointment
@@ -233,7 +311,7 @@ export function ChatWorkspace({
             <Button size="sm" variant="ghost" className="text-gray-600" onClick={() => setShowFact(false)}>
               Dismiss
             </Button>
-            <Button size="sm" variant="outline" className="ml-auto border-gray-200 text-gray-700" onClick={() => toast("Opening appointment scheduler…")}>
+            <Button size="sm" variant="outline" className="ml-auto border-gray-200 text-gray-700" onClick={() => setIsScheduleModalOpen(true)}>
               <CalendarPlus className="w-3.5 h-3.5 mr-1.5 text-blue-700" />
               Schedule
             </Button>
@@ -245,7 +323,7 @@ export function ChatWorkspace({
             <Sparkles className="w-3.5 h-3.5 mr-1.5 text-blue-700" />
             Suggest a fact
           </Button>
-          <Button size="sm" variant="outline" className="border-gray-200 text-gray-700" onClick={() => toast("Opening appointment scheduler…")}>
+          <Button size="sm" variant="outline" className="border-gray-200 text-gray-700" onClick={() => setIsScheduleModalOpen(true)}>
             <CalendarPlus className="w-3.5 h-3.5 mr-1.5 text-blue-700" />
             Schedule Appointment
           </Button>
@@ -268,37 +346,18 @@ export function ChatWorkspace({
           </div>
           <div className="leading-tight min-w-0">
             <div className="flex items-center gap-2">
-              {isEditingContact ? (
-                <div className="flex items-center gap-1">
-                  <Input
-                    value={editContactName}
-                    onChange={e => setEditContactName(e.target.value)}
-                    className="h-6 text-sm px-2 w-48"
-                    autoFocus
-                    placeholder="Enter CRM label"
-                    onKeyDown={(e) => { if(e.key === 'Enter') handleSaveContact(); }}
-                  />
-                  <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600" onClick={handleSaveContact}>
-                    <Check className="w-4 h-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 text-red-600" onClick={() => setIsEditingContact(false)}>
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              ) : (
                 <>
                   <div className="text-sm font-semibold text-gray-900 truncate">{conversation.student_name}</div>
                   {role === "counselor" && (
                     <button
-                      onClick={() => { setEditContactName(conversation.student_name); setIsEditingContact(true); }}
+                      onClick={() => setIsEditingContact(true)}
                       className="text-gray-400 hover:text-gray-600 transition-colors"
-                      title="Edit CRM Label"
+                      title="Edit Contact"
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
+                      <UserPlus className="w-4 h-4" />
                     </button>
                   )}
                 </>
-              )}
             </div>
             <div className="text-xs text-gray-500 flex items-center gap-1.5 mt-0.5">
               {conversation.channel === "WhatsApp" ? (
@@ -325,7 +384,20 @@ export function ChatWorkspace({
         {actionBar}
         {/* Unified input row */}
         <div className="flex items-center gap-2 border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus-within:border-blue-500 transition-colors">
-          <Button variant="ghost" size="icon" className="text-gray-400 shrink-0">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            className="hidden" 
+            onChange={handleFileSelect} 
+            accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
+          />
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className={`text-gray-400 shrink-0 ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+          >
             <Paperclip className="w-4 h-4" />
           </Button>
           <Input
@@ -346,6 +418,24 @@ export function ChatWorkspace({
           </Button>
         </div>
       </div>
+
+      {/* ── Schedule Appointment Modal ─────────────────────────────────────── */}
+      <ScheduleAppointmentModal
+        open={isScheduleModalOpen}
+        onOpenChange={setIsScheduleModalOpen}
+        onSubmit={(title, date, time, location) => {
+          const message = `📅 *Appointment Scheduled*\n\n*Title:* ${title}\n*Date:* ${date}\n*Time:* ${time}\n*Location/Link:* ${location}\n\nPlease let us know if you need to reschedule!`;
+          send(message);
+        }}
+      />
+      <ContactDetailsModal
+        open={isEditingContact}
+        onOpenChange={setIsEditingContact}
+        conversation={conversation}
+        onContactUpdated={(rawPhone, newLabel) => {
+          if (onContactUpdated) onContactUpdated(rawPhone, newLabel);
+        }}
+      />
     </div>
   );
 }
