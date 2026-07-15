@@ -261,7 +261,7 @@ export default function InboxPage() {
 
   const [showProfile, setShowProfile] = useState(false);
 
-  if ((role === "staff" || role === "admin") && inboxMode === "team") {
+  if ((role === "counselor" || role === "admin") && inboxMode === "team") {
     return (
       <div className="flex-1 flex h-full overflow-hidden">
         {showProfile ? (
@@ -280,7 +280,7 @@ export default function InboxPage() {
     );
   }
 
-  const inboxHeader = (role === "staff" || role === "admin") ? (
+  const inboxHeader = (role === "counselor" || role === "admin") ? (
     <div className="p-3 border-b border-gray-200">
       <div className="grid grid-cols-2 bg-gray-100 rounded-md p-1">
         <button

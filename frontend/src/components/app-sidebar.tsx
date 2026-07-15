@@ -38,7 +38,7 @@ const getNavItems = (role: Role) => {
       { name: "Calendar", href: "/calendar", icon: CalendarDays },
     ];
   } else {
-    // staff
+    // counselor
     return [
       { name: "Unified Inbox", href: "/inbox", icon: Inbox },
       { name: "Kanban Pipeline", href: "/kanban", icon: KanbanSquare },
@@ -50,7 +50,7 @@ const getNavItems = (role: Role) => {
 };
 
 const getBottomNavItems = (role: Role) => {
-  if (role === "staff") {
+  if (role === "counselor") {
     return [{ name: "Intent Router", href: "/settings/intent-router", icon: GitBranch }];
   }
   return [];
@@ -93,8 +93,8 @@ export function AppSidebar() {
   const displayInitials = user?.initials ?? "??";
   const jobTitle = role === "admin"
     ? "System Administrator"
-    : role === "staff"
-      ? "Admissions Staff"
+    : role === "counselor"
+      ? "Admissions Counselor"
       : "Student Ambassador";
 
   return (

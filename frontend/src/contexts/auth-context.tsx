@@ -68,8 +68,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return null;
       }
 
+      // Map DB role 'staff' to frontend role 'counselor'
+      const mappedRole = data.role === "staff" ? "counselor" : data.role;
+
       return {
         ...data,
+        role: mappedRole as Role,
         initials: getInitials(data.full_name),
       } as InternalUser;
     },

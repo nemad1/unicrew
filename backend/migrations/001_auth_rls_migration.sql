@@ -1,20 +1,33 @@
 -- ============================================================
 -- 001_auth_rls_migration.sql
--- Adds assigned_to on contacts, enables RLS, creates policies
+-- Renames enum 'staff' -> 'counselor', adds assigned_to & team_id
+-- on contacts, enables RLS, creates policies
 -- ============================================================
 
 -- =========================
--- 1. SCHEMA ADDITIONS
+-- 1. RENAME ENUM VALUE
 -- =========================
 
--- Add assigned_to to contacts so we know which internal_user owns the contact
+-- Rename 'staff' to 'counselor' in user_role enum
+ALTER TYPE user_role RENAME VALUE 'staff' TO 'counselor';
+
+-- =========================
+-- 2. SCHEMA ADDITIONS
+-- =========================
+
+-- Add assigned_to: which specific user is handling this contact (set by counselor)
 ALTER TABLE contacts
   ADD COLUMN IF NOT EXISTS assigned_to UUID REFERENCES internal_users(id) ON DELETE SET NULL;
 
+-- Add team_id: which team owns this contact (set when first saved from a WhatsApp session)
+ALTER TABLE contacts
+  ADD COLUMN IF NOT EXISTS team_id UUID REFERENCES teams(id) ON DELETE SET NULL;
+
 CREATE INDEX IF NOT EXISTS idx_contacts_assigned_to ON contacts(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_contacts_team_id ON contacts(team_id);
 
 -- =========================
--- 2. HELPER FUNCTIONS
+-- 3. HELPER FUNCTIONS
 -- =========================
 
 -- Returns the authenticated user's role from internal_users
@@ -45,7 +58,7 @@ AS $$
 $$;
 
 -- =========================
--- 3. ENABLE RLS
+-- 4. ENABLE RLS
 -- =========================
 
 ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
@@ -60,23 +73,24 @@ ALTER TABLE contact_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 
 -- =========================
--- 4. RLS POLICIES — contacts
+-- 5. RLS POLICIES — contacts
 -- =========================
+-- Visibility:
+--   Admin: sees all contacts (unrestricted)
+--   Counselor: sees contacts where team_id matches their team
+--   Ambassador: sees contacts where assigned_to = themselves
 
 -- Admin: unrestricted read
 CREATE POLICY contacts_admin_select ON contacts
   FOR SELECT TO authenticated
   USING (get_my_role() = 'admin');
 
--- Staff: can see contacts assigned to themselves or to any team member
-CREATE POLICY contacts_staff_select ON contacts
+-- Counselor: can see contacts belonging to their team
+CREATE POLICY contacts_counselor_select ON contacts
   FOR SELECT TO authenticated
   USING (
-    get_my_role() = 'staff'
-    AND (
-      assigned_to = auth.uid()
-      OR assigned_to IN (SELECT get_my_team_member_ids())
-    )
+    get_my_role() = 'counselor'
+    AND team_id = get_my_team_id()
   );
 
 -- Ambassador: can only see contacts assigned to themselves
@@ -100,40 +114,35 @@ CREATE POLICY contacts_admin_delete ON contacts
   FOR DELETE TO authenticated
   USING (get_my_role() = 'admin');
 
--- Staff: can update contacts they can see
-CREATE POLICY contacts_staff_update ON contacts
+-- Counselor: can insert and update contacts in their team
+CREATE POLICY contacts_counselor_insert ON contacts
+  FOR INSERT TO authenticated
+  WITH CHECK (get_my_role() = 'counselor');
+
+CREATE POLICY contacts_counselor_update ON contacts
   FOR UPDATE TO authenticated
   USING (
-    get_my_role() = 'staff'
-    AND (
-      assigned_to = auth.uid()
-      OR assigned_to IN (SELECT get_my_team_member_ids())
-    )
+    get_my_role() = 'counselor'
+    AND team_id = get_my_team_id()
   );
 
--- Staff: can insert contacts (e.g., saving a new prospect)
-CREATE POLICY contacts_staff_insert ON contacts
-  FOR INSERT TO authenticated
-  WITH CHECK (get_my_role() = 'staff');
-
 -- =========================
--- 5. RLS POLICIES — interaction_logs
+-- 6. RLS POLICIES — interaction_logs
 -- =========================
+-- Follows contact visibility: if you can see the contact, you can see its logs
 
 -- Admin: unrestricted read
 CREATE POLICY logs_admin_select ON interaction_logs
   FOR SELECT TO authenticated
   USING (get_my_role() = 'admin');
 
--- Staff: see logs for contacts they can access
-CREATE POLICY logs_staff_select ON interaction_logs
+-- Counselor: see logs for contacts in their team
+CREATE POLICY logs_counselor_select ON interaction_logs
   FOR SELECT TO authenticated
   USING (
-    get_my_role() = 'staff'
+    get_my_role() = 'counselor'
     AND contact_id IN (
-      SELECT id FROM contacts
-      WHERE assigned_to = auth.uid()
-         OR assigned_to IN (SELECT get_my_team_member_ids())
+      SELECT id FROM contacts WHERE team_id = get_my_team_id()
     )
   );
 
@@ -153,7 +162,7 @@ CREATE POLICY logs_authenticated_insert ON interaction_logs
   WITH CHECK (true);
 
 -- =========================
--- 6. RLS POLICIES — kanban_cards
+-- 7. RLS POLICIES — kanban_cards
 -- =========================
 
 -- Admin: full access
@@ -165,22 +174,22 @@ CREATE POLICY cards_admin_all ON kanban_cards
   FOR ALL TO authenticated
   USING (get_my_role() = 'admin');
 
--- Staff: see cards assigned to themselves or team members
-CREATE POLICY cards_staff_select ON kanban_cards
+-- Counselor: see cards for contacts in their team
+CREATE POLICY cards_counselor_select ON kanban_cards
   FOR SELECT TO authenticated
   USING (
-    get_my_role() = 'staff'
+    get_my_role() = 'counselor'
     AND (
       assignee_id = auth.uid()
       OR assignee_id IN (SELECT get_my_team_member_ids())
     )
   );
 
--- Staff: can update cards they can see
-CREATE POLICY cards_staff_update ON kanban_cards
+-- Counselor: can update cards they can see
+CREATE POLICY cards_counselor_update ON kanban_cards
   FOR UPDATE TO authenticated
   USING (
-    get_my_role() = 'staff'
+    get_my_role() = 'counselor'
     AND (
       assignee_id = auth.uid()
       OR assignee_id IN (SELECT get_my_team_member_ids())
@@ -203,7 +212,7 @@ CREATE POLICY cards_ambassador_update ON kanban_cards
   );
 
 -- =========================
--- 7. RLS POLICIES — kanban_boards & kanban_stages
+-- 8. RLS POLICIES — kanban_boards & kanban_stages
 -- =========================
 
 -- Everyone can read boards and stages (structural data)
@@ -225,7 +234,7 @@ CREATE POLICY stages_admin_all ON kanban_stages
   USING (get_my_role() = 'admin');
 
 -- =========================
--- 8. RLS POLICIES — internal_users
+-- 9. RLS POLICIES — internal_users
 -- =========================
 
 -- Admin: full access
@@ -233,11 +242,11 @@ CREATE POLICY users_admin_all ON internal_users
   FOR ALL TO authenticated
   USING (get_my_role() = 'admin');
 
--- Staff: can see all users in their team + themselves
-CREATE POLICY users_staff_select ON internal_users
+-- Counselor: can see all users in their team + themselves
+CREATE POLICY users_counselor_select ON internal_users
   FOR SELECT TO authenticated
   USING (
-    get_my_role() = 'staff'
+    get_my_role() = 'counselor'
     AND (
       id = auth.uid()
       OR team_id = get_my_team_id()
@@ -256,7 +265,7 @@ CREATE POLICY users_ambassador_select ON internal_users
   );
 
 -- =========================
--- 9. RLS POLICIES — teams
+-- 10. RLS POLICIES — teams
 -- =========================
 
 -- All authenticated users can see teams
@@ -270,7 +279,7 @@ CREATE POLICY teams_admin_all ON teams
   USING (get_my_role() = 'admin');
 
 -- =========================
--- 10. RLS POLICIES — ambassador_profiles
+-- 11. RLS POLICIES — ambassador_profiles
 -- =========================
 
 -- All authenticated users can view ambassador profiles
@@ -292,7 +301,7 @@ CREATE POLICY profiles_admin_all ON ambassador_profiles
   USING (get_my_role() = 'admin');
 
 -- =========================
--- 11. RLS POLICIES — contact_notes
+-- 12. RLS POLICIES — contact_notes
 -- =========================
 
 -- Admin: full access
@@ -300,22 +309,20 @@ CREATE POLICY notes_admin_all ON contact_notes
   FOR ALL TO authenticated
   USING (get_my_role() = 'admin');
 
--- Staff: see notes for contacts they can access
-CREATE POLICY notes_staff_select ON contact_notes
+-- Counselor: see notes for contacts in their team
+CREATE POLICY notes_counselor_select ON contact_notes
   FOR SELECT TO authenticated
   USING (
-    get_my_role() = 'staff'
+    get_my_role() = 'counselor'
     AND contact_id IN (
-      SELECT id FROM contacts
-      WHERE assigned_to = auth.uid()
-         OR assigned_to IN (SELECT get_my_team_member_ids())
+      SELECT id FROM contacts WHERE team_id = get_my_team_id()
     )
   );
 
--- Staff: can create notes
-CREATE POLICY notes_staff_insert ON contact_notes
+-- Counselor: can create notes
+CREATE POLICY notes_counselor_insert ON contact_notes
   FOR INSERT TO authenticated
-  WITH CHECK (get_my_role() = 'staff');
+  WITH CHECK (get_my_role() = 'counselor');
 
 -- Ambassador: see notes for their contacts
 CREATE POLICY notes_ambassador_select ON contact_notes
@@ -328,7 +335,7 @@ CREATE POLICY notes_ambassador_select ON contact_notes
   );
 
 -- =========================
--- 12. RLS POLICIES — audit_logs
+-- 13. RLS POLICIES — audit_logs
 -- =========================
 
 -- Admin: full access
@@ -342,7 +349,7 @@ CREATE POLICY audit_authenticated_insert ON audit_logs
   WITH CHECK (true);
 
 -- =========================
--- 13. REVOKE BROAD GRANTS & REPLACE
+-- 14. REVOKE BROAD GRANTS & REPLACE
 -- =========================
 
 -- Revoke the overly broad grants from the original schema
@@ -358,10 +365,25 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
 GRANT ALL ON ALL ROUTINES IN SCHEMA public TO service_role;
 
 -- =========================
--- 14. BACKFILL assigned_to
+-- 15. BACKFILL contacts.team_id
 -- =========================
+-- For existing contacts, assign team_id based on the team of the user
+-- who was assigned the kanban card (the person handling the customer).
 
--- Populate contacts.assigned_to from the most recent kanban_card assignee
+UPDATE contacts c
+SET team_id = iu.team_id
+FROM (
+  SELECT DISTINCT ON (kc.contact_id) kc.contact_id, iu_inner.team_id
+  FROM kanban_cards kc
+  JOIN internal_users iu_inner ON iu_inner.id = kc.assignee_id
+  WHERE kc.assignee_id IS NOT NULL AND iu_inner.team_id IS NOT NULL
+  ORDER BY kc.contact_id, kc.created_at ASC
+) sub
+JOIN internal_users iu ON iu.team_id = sub.team_id
+WHERE c.id = sub.contact_id
+  AND c.team_id IS NULL;
+
+-- Also backfill assigned_to from the latest kanban_card assignee
 UPDATE contacts c
 SET assigned_to = sub.assignee_id
 FROM (

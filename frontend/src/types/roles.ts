@@ -2,7 +2,7 @@
 // Every screen imports Intent + intentStyles from here so categories and
 // their colors stay consistent everywhere.
 
-export type Role = "staff" | "ambassador" | "admin";
+export type Role = "counselor" | "ambassador" | "admin";
 
 export type Intent =
   | "Fees"
