@@ -114,16 +114,36 @@ app.post('/api/whatsapp/sync', async (req, res) => {
 
             const name = chat.name || chat.pushname || chat.formattedTitle || phoneNumber;
 
-            // Only sync messages for contacts that already exist in the CRM
-            const { data: contact, error: contactError } = await supabase
+            let contact;
+            const { data: existingContact, error: contactError } = await supabase
                 .from('contacts')
                 .select('id, ai_summary, fields')
                 .eq('phone_number', phoneNumber)
                 .single();
             
-            if (contactError || !contact) {
-                // Unknown contact, skip syncing
-                continue;
+            if (contactError || !existingContact) {
+                // Unknown contact, create it and assign to this user's team
+                const { data: profile } = await supabase
+                    .from('internal_users')
+                    .select('team_id')
+                    .eq('id', userId)
+                    .single();
+                
+                const { data: newContact, error: createError } = await supabase
+                    .from('contacts')
+                    .insert({
+                        phone_number: phoneNumber,
+                        name: name,
+                        channel: 'WhatsApp',
+                        team_id: profile ? profile.team_id : null
+                    })
+                    .select()
+                    .single();
+                
+                if (createError) continue;
+                contact = newContact;
+            } else {
+                contact = existingContact;
             }
 
             // Sync recent messages for this chat (limit 5 per chat)

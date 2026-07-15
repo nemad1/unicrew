@@ -85,7 +85,7 @@ export function AppSidebar() {
     return pathname === href || pathname.startsWith(href + "/");
   };
 
-  const role = user?.role ?? "staff";
+  const role = user?.role ?? "counselor";
   const navItems = getNavItems(role);
   const bottomNavItems = getBottomNavItems(role);
 
