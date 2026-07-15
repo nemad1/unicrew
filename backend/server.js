@@ -1,12 +1,10 @@
+require('dotenv').config();
 const express = require('express');
-const dotenv = require('dotenv');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const { getSessionStatus, fetchAllChats, getChatMessages } = require('./whatsappManager');
 const { analyzeContactProfile } = require('./aiService');
 const { startDailyAnalysisCron } = require('./cron/dailyAnalysis');
-
-dotenv.config();
 
 const app = express();
 app.use(cors());

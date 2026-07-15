@@ -1,7 +1,13 @@
 const { OpenAI } = require('openai');
 
+const apiKey = process.env.GROK_API_KEY || process.env.OPENAI_API_KEY;
+
+if (!apiKey) {
+    console.warn("WARNING: GROK_API_KEY or OPENAI_API_KEY is not set. AI features will fail if called.");
+}
+
 const openai = new OpenAI({
-    apiKey: process.env.GROK_API_KEY,
+    apiKey: apiKey || 'missing_key_prevent_crash_on_startup',
     baseURL: 'https://api.x.ai/v1',
 });
 
