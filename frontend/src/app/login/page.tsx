@@ -2,36 +2,69 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { GraduationCap } from "lucide-react";
+import { GraduationCap, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import type { Role } from "@/types/roles";
+import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [role, setRole] = useState<Role>("counselor");
+  const supabase = createClient();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [emailError, setEmailError] = useState(false);
   const [passwordError, setPasswordError] = useState(false);
   const [showReset, setShowReset] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthError(null);
+
     const emailEmpty = email.trim() === "";
     const passwordEmpty = password.trim() === "";
     setEmailError(emailEmpty);
     setPasswordError(passwordEmpty);
     if (emailEmpty || passwordEmpty) return;
 
-    // Store chosen role in sessionStorage for the AuthProvider to pick up.
-    // Will be replaced by real Supabase auth later.
-    sessionStorage.setItem("campuscrm_role", role);
-    sessionStorage.setItem("campuscrm_authed", "true");
-    router.push("/inbox");
+    setIsLoading(true);
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        setAuthError(error.message);
+        setIsLoading(false);
+        return;
+      }
+
+      if (data.user) {
+        // Fetch the user's role to determine where to redirect
+        const { data: profile } = await supabase
+          .from("internal_users")
+          .select("role")
+          .eq("id", data.user.id)
+          .single();
+
+        if (profile?.role === "admin") {
+          router.push("/admin");
+        } else {
+          router.push("/inbox");
+        }
+        // Note: router.push + middleware will handle refresh
+        router.refresh();
+      }
+    } catch (err) {
+      setAuthError("An unexpected error occurred. Please try again.");
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -43,52 +76,33 @@ export default function LoginPage() {
           </div>
           <h1 className="mt-4 text-2xl font-semibold text-gray-900">Welcome Back</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Sign in to CampusCRM, your student communication dashboard.
+            Sign in to UniCrew, your student communication dashboard.
           </p>
         </div>
 
-        <Tabs
-          value={role}
-          onValueChange={(v) => setRole(v as Role)}
-          className="mt-6"
-        >
-          <TabsList className="w-full grid grid-cols-3 bg-gray-100 p-1 rounded-md">
-            <TabsTrigger
-              value="admin"
-              className="text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 text-gray-600 rounded"
-            >
-              Admin
-            </TabsTrigger>
-            <TabsTrigger
-              value="counselor"
-              className="text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 text-gray-600 rounded"
-            >
-              Counselor
-            </TabsTrigger>
-            <TabsTrigger
-              value="ambassador"
-              className="text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 text-gray-600 rounded"
-            >
-              Ambassador
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        {authError && (
+          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+            <p className="text-sm text-red-700">{authError}</p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="login-email" className="text-xs text-gray-600">
-              Staff Email / ID
+              Staff Email
             </Label>
             <Input
               id="login-email"
-              type="text"
+              type="email"
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);
                 if (emailError) setEmailError(false);
+                if (authError) setAuthError(null);
               }}
               placeholder="amelia.park@university.edu"
               aria-invalid={emailError}
+              disabled={isLoading}
               className={cn(
                 "bg-white border-gray-200",
                 emailError && "border-red-500 focus-visible:ring-red-500",
@@ -119,9 +133,11 @@ export default function LoginPage() {
               onChange={(e) => {
                 setPassword(e.target.value);
                 if (passwordError) setPasswordError(false);
+                if (authError) setAuthError(null);
               }}
               placeholder="••••••••"
               aria-invalid={passwordError}
+              disabled={isLoading}
               className={cn(
                 "bg-white border-gray-200",
                 passwordError && "border-red-500 focus-visible:ring-red-500",
@@ -146,14 +162,22 @@ export default function LoginPage() {
 
           <Button
             type="submit"
+            disabled={isLoading}
             className="w-full bg-blue-700 hover:bg-blue-800 text-white"
           >
-            Sign In
+            {isLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Signing in...
+              </>
+            ) : (
+              "Sign In"
+            )}
           </Button>
         </form>
 
         <p className="mt-6 text-center text-xs text-gray-400">
-          Secure Single Sign-On (SSO) enabled. Contact IT Support for access issues.
+          Contact your administrator for account access. Self-registration is disabled.
         </p>
       </div>
     </div>

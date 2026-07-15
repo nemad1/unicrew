@@ -25,6 +25,7 @@ const getNavItems = (role: Role) => {
   if (role === "admin") {
     return [
       { name: "Dashboard", href: "/admin", icon: BarChart3 },
+      { name: "Inbox", href: "/inbox", icon: Inbox },
       { name: "User Management", href: "/admin/users", icon: Users },
       { name: "AI Router Admin", href: "/settings/intent-router", icon: GitBranch },
       { name: "Settings", href: "/admin/settings", icon: Settings },
@@ -37,6 +38,7 @@ const getNavItems = (role: Role) => {
       { name: "Calendar", href: "/calendar", icon: CalendarDays },
     ];
   } else {
+    // staff
     return [
       { name: "Unified Inbox", href: "/inbox", icon: Inbox },
       { name: "Kanban Pipeline", href: "/kanban", icon: KanbanSquare },
@@ -48,7 +50,7 @@ const getNavItems = (role: Role) => {
 };
 
 const getBottomNavItems = (role: Role) => {
-  if (role === "counselor") {
+  if (role === "staff") {
     return [{ name: "Intent Router", href: "/settings/intent-router", icon: GitBranch }];
   }
   return [];
@@ -83,8 +85,17 @@ export function AppSidebar() {
     return pathname === href || pathname.startsWith(href + "/");
   };
 
-  const navItems = getNavItems(user.role);
-  const bottomNavItems = getBottomNavItems(user.role);
+  const role = user?.role ?? "staff";
+  const navItems = getNavItems(role);
+  const bottomNavItems = getBottomNavItems(role);
+
+  const displayName = user?.full_name ?? "User";
+  const displayInitials = user?.initials ?? "??";
+  const jobTitle = role === "admin"
+    ? "System Administrator"
+    : role === "staff"
+      ? "Admissions Staff"
+      : "Student Ambassador";
 
   return (
     <aside
@@ -118,7 +129,7 @@ export function AppSidebar() {
         {!collapsed && (
           <>
             <div className="flex flex-col leading-tight flex-1 min-w-0">
-              <span className={cn("text-sm font-medium", isAdmin ? "text-slate-100" : "text-gray-900")}>CampusCRM</span>
+              <span className={cn("text-sm font-medium", isAdmin ? "text-slate-100" : "text-gray-900")}>UniCrew</span>
               <span className={cn("text-xs", isAdmin ? "text-slate-400" : "text-gray-500")}>
                 {isAdmin ? "Admin Console" : "Student Comms"}
               </span>
@@ -242,9 +253,9 @@ export function AppSidebar() {
                 "w-8 h-8 rounded-full text-white flex items-center justify-center text-xs",
                 isAdmin ? "bg-slate-700" : "bg-blue-700"
               )}
-              title={`${user.name} · ${user.jobTitle}`}
+              title={`${displayName} · ${jobTitle}`}
             >
-              {user.initials}
+              {displayInitials}
             </div>
           </div>
         ) : (
@@ -255,14 +266,14 @@ export function AppSidebar() {
                 isAdmin ? "bg-slate-700 font-semibold" : "bg-blue-700"
               )}
             >
-              {user.initials}
+              {displayInitials}
             </div>
             <div className="flex flex-col leading-tight flex-1 min-w-0">
               <span className={cn("text-sm truncate", isAdmin ? "text-slate-100" : "text-gray-900")}>
-                {user.name}
+                {displayName}
               </span>
               <span className={cn("text-xs truncate", isAdmin ? "text-slate-400" : "text-gray-500")}>
-                {user.jobTitle}
+                {jobTitle}
               </span>
             </div>
             <button

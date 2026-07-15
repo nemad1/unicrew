@@ -1,6 +1,5 @@
 import { AuthProvider } from "@/contexts/auth-context";
 import { AppSidebar } from "@/components/app-sidebar";
-import { RoleSwitcher } from "@/components/role-switcher";
 import { Toaster } from "sonner";
 
 export default function DashboardLayout({
@@ -14,7 +13,6 @@ export default function DashboardLayout({
         <Toaster position="top-right" richColors />
         <AppSidebar />
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">{children}</main>
-        <RoleSwitcher />
       </div>
     </AuthProvider>
   );

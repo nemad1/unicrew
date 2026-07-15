@@ -36,7 +36,7 @@ export default function InboxPage() {
   const paramActiveId = searchParams.get("activeId");
 
   const [activeId, setActiveId] = useState<string>(paramActiveId || "");
-  const [inboxMode, setInboxMode] = useState<InboxMode>(paramActiveId ? "personal" : "team");
+  const [inboxMode, setInboxMode] = useState<InboxMode>(paramActiveId ? "personal" : "personal");
   const [whatsappStatus, setWhatsappStatus] = useState<"DISCONNECTED" | "CONNECTED">("DISCONNECTED");
   const [sessionId, setSessionId] = useState<string>("");
   const [conversations, setConversations] = useState<any[]>([]);
@@ -255,15 +255,13 @@ export default function InboxPage() {
     }
   }, [activeId, whatsappStatus, sessionId]);
 
-  const visibleConversations = role === "ambassador"
-    ? conversations.filter(c => c.intent === "Campus Life" || c.intent === "Courses" || c.intent === "General")
-    : conversations;
+  const visibleConversations = conversations;
 
   const activeConversation = visibleConversations.find(c => c.id === activeId);
 
   const [showProfile, setShowProfile] = useState(false);
 
-  if (role === "counselor" && inboxMode === "team") {
+  if ((role === "staff" || role === "admin") && inboxMode === "team") {
     return (
       <div className="flex-1 flex h-full overflow-hidden">
         {showProfile ? (
@@ -282,7 +280,7 @@ export default function InboxPage() {
     );
   }
 
-  const inboxHeader = role === "counselor" ? (
+  const inboxHeader = (role === "staff" || role === "admin") ? (
     <div className="p-3 border-b border-gray-200">
       <div className="grid grid-cols-2 bg-gray-100 rounded-md p-1">
         <button

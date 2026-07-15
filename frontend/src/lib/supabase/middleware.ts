@@ -32,7 +32,30 @@ export async function updateSession(request: NextRequest) {
   // IMPORTANT: Do not add logic between createServerClient and
   // supabase.auth.getUser(). A simple mistake could make it very hard to debug
   // issues with users being randomly logged out.
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const pathname = request.nextUrl.pathname;
+
+  // Allow API routes to pass through without redirect
+  if (pathname.startsWith("/api/")) {
+    return supabaseResponse;
+  }
+
+  // If there's no authenticated user and they're not on the login page, redirect
+  if (!user && pathname !== "/login") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    return NextResponse.redirect(url);
+  }
+
+  // If user is authenticated and on the login page, redirect to inbox
+  if (user && pathname === "/login") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/inbox";
+    return NextResponse.redirect(url);
+  }
 
   return supabaseResponse;
 }

@@ -9,101 +9,152 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import type { Role } from "@/types/roles";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 
-interface User {
+export interface InternalUser {
   id: string;
-  name: string;
   email: string;
+  full_name: string;
   role: Role;
+  team_id: string | null;
+  is_team_leader: boolean;
   initials: string;
-  jobTitle: string;
 }
 
 interface AuthContextValue {
-  user: User;
+  /** Supabase Auth user */
+  authUser: SupabaseUser | null;
+  /** Internal user profile from internal_users table */
+  user: InternalUser | null;
   role: Role;
-  authed: boolean;
-  setRole: (role: Role) => void;
-  signOut: () => void;
+  teamId: string | null;
+  isTeamLeader: boolean;
+  loading: boolean;
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// Mock users for each role — will be replaced by real Supabase Auth.
-const MOCK_USERS: Record<Role, User> = {
-  counselor: {
-    id: "mock-counselor-1",
-    name: "Amelia Park",
-    email: "amelia.park@campuscrm.io",
-    role: "counselor",
-    initials: "AM",
-    jobTitle: "Admissions Lead",
-  },
-  ambassador: {
-    id: "mock-ambassador-1",
-    name: "Jordan Lee",
-    email: "jordan.lee@campuscrm.io",
-    role: "ambassador",
-    initials: "JL",
-    jobTitle: "Student Ambassador",
-  },
-  admin: {
-    id: "mock-admin-1",
-    name: "Sarah Chen",
-    email: "sarah.chen@campuscrm.io",
-    role: "admin",
-    initials: "SC",
-    jobTitle: "System Administrator",
-  },
-};
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [role, setRoleState] = useState<Role>("counselor");
-  const [authed, setAuthed] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
+  const supabase = createClient();
 
-  // On mount, read auth state from sessionStorage
+  const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
+  const [internalUser, setInternalUser] = useState<InternalUser | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch the internal_users record for a given auth user ID
+  const fetchInternalUser = useCallback(
+    async (userId: string) => {
+      const { data, error } = await supabase
+        .from("internal_users")
+        .select("id, email, full_name, role, team_id, is_team_leader")
+        .eq("id", userId)
+        .single();
+
+      if (error || !data) {
+        console.error("Failed to fetch internal user:", error);
+        return null;
+      }
+
+      return {
+        ...data,
+        initials: getInitials(data.full_name),
+      } as InternalUser;
+    },
+    [supabase]
+  );
+
+  // Bootstrap: check current session on mount
   useEffect(() => {
-    const storedAuthed = sessionStorage.getItem("campuscrm_authed");
-    const storedRole = sessionStorage.getItem("campuscrm_role") as Role | null;
+    const init = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-    if (storedAuthed === "true" && storedRole) {
-      setRoleState(storedRole);
-      setAuthed(true);
-    } else {
-      // Not authenticated — redirect to login
-      router.replace("/login");
-    }
-    setHydrated(true);
-  }, [router]);
+        if (user) {
+          setAuthUser(user);
+          const profile = await fetchInternalUser(user.id);
+          setInternalUser(profile);
+        }
+      } catch (err) {
+        console.error("Auth init error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const user = MOCK_USERS[role];
+    init();
 
-  const setRole = useCallback((newRole: Role) => {
-    setRoleState(newRole);
-    sessionStorage.setItem("campuscrm_role", newRole);
-  }, []);
+    // Listen for auth state changes (sign in, sign out, token refresh)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_IN" && session?.user) {
+        setAuthUser(session.user);
+        const profile = await fetchInternalUser(session.user.id);
+        setInternalUser(profile);
+      } else if (event === "SIGNED_OUT") {
+        setAuthUser(null);
+        setInternalUser(null);
+        router.push("/login");
+      }
+    });
 
-  const signOut = useCallback(() => {
-    sessionStorage.removeItem("campuscrm_authed");
-    sessionStorage.removeItem("campuscrm_role");
-    setAuthed(false);
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [supabase, fetchInternalUser, router]);
+
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
+    setAuthUser(null);
+    setInternalUser(null);
     router.push("/login");
-  }, [router]);
+  }, [supabase, router]);
 
-  // Don't render children until we've checked auth state to avoid flash
-  if (!hydrated) {
-    return null;
+  // Show nothing while loading to prevent flash
+  if (loading) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-white">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-blue-700 border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm text-gray-500">Loading...</span>
+        </div>
+      </div>
+    );
   }
 
-  if (!authed) {
+  // If not authenticated, don't render dashboard children
+  // (middleware should redirect, but this is a safety net)
+  if (!authUser || !internalUser) {
     return null;
   }
 
   return (
-    <AuthContext.Provider value={{ user, role, authed, setRole, signOut }}>
+    <AuthContext.Provider
+      value={{
+        authUser,
+        user: internalUser,
+        role: internalUser.role,
+        teamId: internalUser.team_id,
+        isTeamLeader: internalUser.is_team_leader,
+        loading,
+        signOut,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
