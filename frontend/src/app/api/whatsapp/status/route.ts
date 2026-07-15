@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 
 const OPENWA_API_URL = process.env.NEXT_PUBLIC_OPENWA_API_URL || "https://openwa-production-7315.up.railway.app";
 const OPENWA_API_KEY = process.env.OPENWA_API_KEY || process.env.NEXT_PUBLIC_OPENWA_API_KEY || "";
@@ -8,17 +9,23 @@ const headers = {
   'X-API-Key': OPENWA_API_KEY
 };
 
-async function getOrCreateSessionId() {
+async function getOrCreateSessionId(userId: string) {
   try {
+    const sessionName = `user-${userId}`;
     const res = await fetch(`${OPENWA_API_URL}/api/sessions`, { headers });
     const sessions = await res.json();
-    if (Array.isArray(sessions) && sessions.length > 0) {
-      return sessions[0].id;
+
+    if (Array.isArray(sessions)) {
+      const existingSession = sessions.find((s: any) => s.name === sessionName);
+      if (existingSession) {
+        return existingSession.id;
+      }
     }
+
     const createRes = await fetch(`${OPENWA_API_URL}/api/sessions`, { 
       method: 'POST', 
       headers, 
-      body: JSON.stringify({ name: 'unicrew-main' }) 
+      body: JSON.stringify({ name: sessionName })
     });
     const newSession = await createRes.json();
     if (newSession.id) {
@@ -31,7 +38,14 @@ async function getOrCreateSessionId() {
 }
 
 export async function GET(request: Request) {
-  const sessionId = await getOrCreateSessionId();
+  const supabase = await createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+
+  if (!user || error) {
+    return NextResponse.json({ status: 'STARTING', qr: null, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const sessionId = await getOrCreateSessionId(user.id);
   if (!sessionId) {
     return NextResponse.json({ status: 'STARTING', qr: null });
   }
