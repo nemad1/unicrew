@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { ChatList } from "@/components/chat/chat-list";
 import { ChatWorkspace } from "@/components/chat/chat-workspace";
@@ -43,6 +43,11 @@ export default function InboxPage() {
   const [activeMessages, setActiveMessages] = useState<any[]>([]);
   const [crmContacts, setCrmContacts] = useState<Record<string, string>>({});
 
+  const handleWhatsappConnected = useCallback((sid?: string) => {
+    if (sid) setSessionId(sid);
+    setWhatsappStatus("CONNECTED");
+  }, []);
+
   const crmContactsRef = useRef<Record<string, string>>({});
 
   // Sync the ref with state to allow the socket closure to read the latest map
@@ -72,7 +77,7 @@ export default function InboxPage() {
       }
     };
     fetchCrmContacts();
-  }, [supabase]);
+  }, []);
 
   // Setup Socket.IO for live messages
   useEffect(() => {
@@ -309,10 +314,7 @@ export default function InboxPage() {
 
       <div className="flex-1 flex flex-col bg-white overflow-hidden">
         {whatsappStatus !== "CONNECTED" ? (
-          <WhatsappQR onConnected={(sid?: string) => {
-            if (sid) setSessionId(sid);
-            setWhatsappStatus("CONNECTED");
-          }} />
+          <WhatsappQR onConnected={handleWhatsappConnected} />
         ) : showProfile ? (
           <ProspectProfile
             onBack={() => setShowProfile(false)}
