@@ -19,17 +19,20 @@ export function WhatsappQR({ onConnected }: { onConnected: (sessionId?: string) 
   useEffect(() => {
     if (!user?.id) return;
 
+    let interval: ReturnType<typeof setInterval>;
+
     const checkStatus = async () => {
       try {
         const res = await fetch(`/api/whatsapp/status?userId=${user.id}`);
         if (!res.ok) throw new Error("Failed to fetch WhatsApp status");
-        
+
         const data: StatusResponse = await res.json();
         setStatus(data.status);
-        
+
         if (data.status === "QR_READY" && data.qr) {
           setQrCode(data.qr);
         } else if (data.status === "CONNECTED") {
+          clearInterval(interval);
           onConnected((data as any).sessionId);
         }
       } catch (err) {
@@ -41,8 +44,8 @@ export function WhatsappQR({ onConnected }: { onConnected: (sessionId?: string) 
     checkStatus();
 
     // Poll every 2 seconds
-    const interval = setInterval(checkStatus, 2000);
-    
+    interval = setInterval(checkStatus, 2000);
+
     return () => clearInterval(interval);
   }, [user?.id, onConnected]);
 
