@@ -1,10 +1,18 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Pencil, UserX, Trash2, Plus, Loader2, Crown, Users, Shield } from "lucide-react";
+import { Pencil, UserX, UserCheck, Trash2, Plus, Loader2, Crown, Users, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { CreateUserModal } from "@/components/admin/create-user-modal";
+import { EditUserModal } from "@/components/admin/edit-user-modal";
 
 type InternalUser = {
   id: string;
@@ -13,9 +21,12 @@ type InternalUser = {
   role: "admin" | "counselor" | "ambassador";
   team_id: string | null;
   is_team_leader: boolean;
+  is_active: boolean;
   created_at: string;
   teams: { id: string; name: string } | null;
 };
+
+type Team = { id: string; name: string };
 
 function StatusBadge({ role }: { role: string }) {
   const styles = {
@@ -101,30 +112,50 @@ function NameCell({
 }
 
 function RowActions({
-  userId,
+  user,
+  onEdit,
   onDelete,
+  onToggleStatus,
   isDeleting,
+  isTogglingStatus,
 }: {
-  userId: string;
+  user: InternalUser;
+  onEdit: (user: InternalUser) => void;
   onDelete: (id: string) => void;
+  onToggleStatus: (user: InternalUser) => void;
   isDeleting: boolean;
+  isTogglingStatus: boolean;
 }) {
   return (
     <div className="flex items-center gap-1 justify-end">
       <button
+        onClick={() => onEdit(user)}
         className="p-1.5 rounded text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors"
         title="Edit"
       >
         <Pencil className="w-3.5 h-3.5" />
       </button>
       <button
-        className="p-1.5 rounded text-gray-500 hover:text-amber-600 hover:bg-amber-50 transition-colors"
-        title="Deactivate"
+        onClick={() => onToggleStatus(user)}
+        disabled={isTogglingStatus}
+        className={cn(
+          "p-1.5 rounded transition-colors disabled:opacity-50",
+          user.is_active
+            ? "text-gray-500 hover:text-amber-600 hover:bg-amber-50"
+            : "text-emerald-600 hover:bg-emerald-50"
+        )}
+        title={user.is_active ? "Deactivate" : "Reactivate"}
       >
-        <UserX className="w-3.5 h-3.5" />
+        {isTogglingStatus ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        ) : user.is_active ? (
+          <UserX className="w-3.5 h-3.5" />
+        ) : (
+          <UserCheck className="w-3.5 h-3.5" />
+        )}
       </button>
       <button
-        onClick={() => onDelete(userId)}
+        onClick={() => onDelete(user.id)}
         disabled={isDeleting}
         className="p-1.5 rounded text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
         title="Remove"
@@ -142,9 +173,16 @@ function RowActions({
 export default function UserManagementPage() {
   const [tab, setTab] = useState<"all" | "counselors" | "ambassadors">("all");
   const [users, setUsers] = useState<InternalUser[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<InternalUser | null>(null);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkTeamId, setBulkTeamId] = useState<string>("");
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -162,6 +200,12 @@ export default function UserManagementPage() {
 
   useEffect(() => {
     fetchUsers();
+    fetch("/api/admin/teams")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) setTeams(data);
+      })
+      .catch(console.error);
   }, [fetchUsers]);
 
   const handleDelete = async (userId: string) => {
@@ -180,6 +224,64 @@ export default function UserManagementPage() {
       alert("Failed to delete user.");
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleToggleStatus = async (user: InternalUser) => {
+    const nextActive = !user.is_active;
+    const verb = nextActive ? "reactivate" : "deactivate";
+    if (!confirm(`Are you sure you want to ${verb} ${user.full_name}?`)) return;
+
+    setTogglingId(user.id);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_active: nextActive }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || `Failed to ${verb} user.`);
+        return;
+      }
+      setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, is_active: nextActive } : u)));
+    } catch {
+      alert(`Failed to ${verb} user.`);
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkReassign = async () => {
+    if (selectedIds.size === 0 || !bulkTeamId) return;
+    setBulkSubmitting(true);
+    try {
+      const res = await fetch("/api/admin/users/bulk-reassign", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds: Array.from(selectedIds), team_id: bulkTeamId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to reassign users.");
+        return;
+      }
+      await fetchUsers();
+      setSelectedIds(new Set());
+      setBulkTeamId("");
+    } catch {
+      alert("Failed to reassign users.");
+    } finally {
+      setBulkSubmitting(false);
     }
   };
 
@@ -264,6 +366,39 @@ export default function UserManagementPage() {
         ))}
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="bg-blue-50 border-b border-blue-100 px-6 py-2.5 flex items-center gap-3 shrink-0">
+          <span className="text-xs font-medium text-blue-800">{selectedIds.size} selected</span>
+          <Select value={bulkTeamId} onValueChange={setBulkTeamId}>
+            <SelectTrigger className="w-48 h-8 bg-white text-xs">
+              <SelectValue placeholder="Move to team..." />
+            </SelectTrigger>
+            <SelectContent>
+              {teams.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            onClick={handleBulkReassign}
+            disabled={!bulkTeamId || bulkSubmitting}
+            className="bg-blue-700 hover:bg-blue-800 text-white h-8"
+          >
+            {bulkSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Move"}
+          </Button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-xs text-blue-700 hover:underline"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+
       {/* Content */}
       <div className="p-6 space-y-6">
         {loading ? (
@@ -296,9 +431,29 @@ export default function UserManagementPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr className="text-left text-xs text-gray-500">
+                      <th className="px-5 py-3 font-medium w-8">
+                        <input
+                          type="checkbox"
+                          disabled={group.members.every((m) => m.role === "admin")}
+                          checked={
+                            group.members.some((m) => m.role !== "admin") &&
+                            group.members.filter((m) => m.role !== "admin").every((m) => selectedIds.has(m.id))
+                          }
+                          onChange={(e) => {
+                            setSelectedIds((prev) => {
+                              const next = new Set(prev);
+                              group.members
+                                .filter((m) => m.role !== "admin")
+                                .forEach((m) => (e.target.checked ? next.add(m.id) : next.delete(m.id)));
+                              return next;
+                            });
+                          }}
+                        />
+                      </th>
                       <th className="px-5 py-3 font-medium">Name</th>
                       <th className="px-5 py-3 font-medium">Email</th>
                       <th className="px-5 py-3 font-medium">Role</th>
+                      <th className="px-5 py-3 font-medium">Status</th>
                       <th className="px-5 py-3 font-medium">Created</th>
                       <th className="px-5 py-3 font-medium text-right">Actions</th>
                     </tr>
@@ -307,8 +462,20 @@ export default function UserManagementPage() {
                     {group.members.map((u, ui) => (
                       <tr
                         key={u.id}
-                        className="border-b border-gray-100 last:border-0 hover:bg-gray-50/40"
+                        className={cn(
+                          "border-b border-gray-100 last:border-0 hover:bg-gray-50/40",
+                          !u.is_active && "opacity-50"
+                        )}
                       >
+                        <td className="px-5 py-3">
+                          {u.role !== "admin" && (
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(u.id)}
+                              onChange={() => toggleSelected(u.id)}
+                            />
+                          )}
+                        </td>
                         <td className="px-5 py-3">
                           <NameCell
                             name={u.full_name}
@@ -319,6 +486,18 @@ export default function UserManagementPage() {
                         <td className="px-5 py-3 text-gray-600 text-xs">{u.email}</td>
                         <td className="px-5 py-3">
                           <StatusBadge role={u.role} />
+                        </td>
+                        <td className="px-5 py-3">
+                          <span
+                            className={cn(
+                              "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] border",
+                              u.is_active
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : "bg-gray-100 text-gray-500 border-gray-200"
+                            )}
+                          >
+                            {u.is_active ? "Active" : "Deactivated"}
+                          </span>
                         </td>
                         <td className="px-5 py-3 text-gray-600 text-xs">
                           {u.created_at
@@ -332,9 +511,12 @@ export default function UserManagementPage() {
                         <td className="px-5 py-3">
                           {u.role !== "admin" ? (
                             <RowActions
-                              userId={u.id}
+                              user={u}
+                              onEdit={setEditingUser}
                               onDelete={handleDelete}
+                              onToggleStatus={handleToggleStatus}
                               isDeleting={deletingId === u.id}
+                              isTogglingStatus={togglingId === u.id}
                             />
                           ) : (
                             <span className="text-xs text-gray-400 text-right block">
@@ -356,6 +538,12 @@ export default function UserManagementPage() {
         open={showModal}
         onClose={() => setShowModal(false)}
         onCreated={fetchUsers}
+      />
+
+      <EditUserModal
+        user={editingUser}
+        onClose={() => setEditingUser(null)}
+        onUpdated={fetchUsers}
       />
     </div>
   );

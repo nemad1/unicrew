@@ -21,6 +21,7 @@ export interface InternalUser {
   team_id: string | null;
   is_team_leader: boolean;
   initials: string;
+  avatar_url: string | null;
 }
 
 interface AuthContextValue {
@@ -59,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (userId: string) => {
       const { data, error } = await supabase
         .from("internal_users")
-        .select("id, email, full_name, role, team_id, is_team_leader")
+        .select("id, email, full_name, role, team_id, is_team_leader, avatar_url")
         .eq("id", userId)
         .single();
 

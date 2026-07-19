@@ -55,6 +55,7 @@ export async function GET() {
       role,
       team_id,
       is_team_leader,
+      is_active,
       created_at,
       teams (
         id,

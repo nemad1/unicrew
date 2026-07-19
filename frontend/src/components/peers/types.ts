@@ -48,6 +48,7 @@ export type PeerUser = {
   favouriteCourses?: string[];
   online?: boolean;
   availability?: AvailabilityEntry[];
+  contactPhone?: string | null;
 };
 
 export const DAY_LABELS: Record<AvailabilityDay, string> = {
@@ -65,6 +66,12 @@ export const DAY_ORDER: AvailabilityDay[] = ["mon", "tue", "wed", "thu", "fri", 
 export function formatTimeRange(entry: AvailabilityEntry | undefined): string {
   if (!entry || !entry.start || !entry.end) return "Unavailable";
   return `${entry.start} – ${entry.end}`;
+}
+
+export function whatsappLink(contactPhone: string | null | undefined): string | null {
+  if (!contactPhone) return null;
+  const digits = contactPhone.replace(/\D/g, "");
+  return digits ? `https://wa.me/${digits}` : null;
 }
 
 export function formatDuration(seconds: number | null): string {

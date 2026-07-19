@@ -250,35 +250,46 @@ export function AppSidebar() {
         )}
       >
         {collapsed ? (
-          <div className="flex justify-center">
+          <Link href="/profile" className="flex justify-center" title="My Profile">
             <div
               className={cn(
-                "w-8 h-8 rounded-full text-white flex items-center justify-center text-xs",
+                "w-8 h-8 rounded-full text-white flex items-center justify-center text-xs overflow-hidden",
                 isAdmin ? "bg-slate-700" : "bg-blue-700"
               )}
-              title={`${displayName} · ${jobTitle}`}
             >
-              {displayInitials}
+              {user?.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+              ) : (
+                displayInitials
+              )}
             </div>
-          </div>
+          </Link>
         ) : (
           <div className="flex items-center gap-3 px-2 py-2">
-            <div
-              className={cn(
-                "w-8 h-8 rounded-full text-white flex items-center justify-center text-xs shrink-0",
-                isAdmin ? "bg-slate-700 font-semibold" : "bg-blue-700"
-              )}
-            >
-              {displayInitials}
-            </div>
-            <div className="flex flex-col leading-tight flex-1 min-w-0">
-              <span className={cn("text-sm truncate", isAdmin ? "text-slate-100" : "text-gray-900")}>
-                {displayName}
-              </span>
-              <span className={cn("text-xs truncate", isAdmin ? "text-slate-400" : "text-gray-500")}>
-                {jobTitle}
-              </span>
-            </div>
+            <Link href="/profile" className="flex items-center gap-3 flex-1 min-w-0">
+              <div
+                className={cn(
+                  "w-8 h-8 rounded-full text-white flex items-center justify-center text-xs shrink-0 overflow-hidden",
+                  isAdmin ? "bg-slate-700 font-semibold" : "bg-blue-700"
+                )}
+              >
+                {user?.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  displayInitials
+                )}
+              </div>
+              <div className="flex flex-col leading-tight flex-1 min-w-0">
+                <span className={cn("text-sm truncate", isAdmin ? "text-slate-100" : "text-gray-900")}>
+                  {displayName}
+                </span>
+                <span className={cn("text-xs truncate", isAdmin ? "text-slate-400" : "text-gray-500")}>
+                  {jobTitle}
+                </span>
+              </div>
+            </Link>
             <button
               onClick={signOut}
               className={cn(

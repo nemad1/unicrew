@@ -53,6 +53,7 @@ export default function PeersPage() {
             role,
             is_team_leader,
             team_id,
+            contact_phone,
             teams ( id, name ),
             ambassador_profiles (
               avatar_colour,
@@ -105,6 +106,7 @@ export default function PeersPage() {
             favouriteCourses: profile.favourite_courses || [],
             online: profile.is_online || false,
             availability: profile.availability_schedule || [],
+            contactPhone: u.contact_phone || null,
           };
         });
 

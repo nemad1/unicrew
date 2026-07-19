@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
 import { PerformanceStatsPanel } from "./PerformanceStatsPanel";
-import type { PeerUser } from "./types";
+import { whatsappLink, type PeerUser } from "./types";
 
 export function AmbassadorCard({
   user,
@@ -109,7 +109,15 @@ export function AmbassadorCard({
 
         <div className="mt-auto pt-4 w-full space-y-2">
           {!isCounselor && (
-            <Button className="w-full bg-blue-700 hover:bg-blue-800 text-white shadow-sm">
+            <Button
+              className="w-full bg-blue-700 hover:bg-blue-800 text-white shadow-sm disabled:opacity-50"
+              disabled={!whatsappLink(user.contactPhone)}
+              title={whatsappLink(user.contactPhone) ? undefined : "No WhatsApp number on file"}
+              onClick={() => {
+                const link = whatsappLink(user.contactPhone);
+                if (link) window.open(link, "_blank", "noopener,noreferrer");
+              }}
+            >
               Chat with {user.name.split(" ")[0]}
             </Button>
           )}

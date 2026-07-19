@@ -8,7 +8,7 @@ import { PerformanceStatsPanel } from "./PerformanceStatsPanel";
 import { HashtagList } from "./HashtagList";
 import { ClubsSocietiesList } from "./ClubsSocietiesList";
 import { WeeklyAvailabilityTable } from "./WeeklyAvailabilityTable";
-import type { PeerUser } from "./types";
+import { whatsappLink, type PeerUser } from "./types";
 
 export function AmbassadorFullProfileModal({
   user,
@@ -77,7 +77,15 @@ export function AmbassadorFullProfileModal({
 
             {!isCounselor && (
               <div className="flex flex-col gap-2 shrink-0 mt-1">
-                <Button className="bg-white text-blue-700 hover:bg-blue-50 shadow-sm whitespace-nowrap">
+                <Button
+                  className="bg-white text-blue-700 hover:bg-blue-50 shadow-sm whitespace-nowrap disabled:opacity-50"
+                  disabled={!whatsappLink(user.contactPhone)}
+                  title={whatsappLink(user.contactPhone) ? undefined : "No WhatsApp number on file"}
+                  onClick={() => {
+                    const link = whatsappLink(user.contactPhone);
+                    if (link) window.open(link, "_blank", "noopener,noreferrer");
+                  }}
+                >
                   Chat with {firstName}
                 </Button>
                 <Button variant="outline" className="bg-transparent border-white/40 text-white hover:bg-white/10 whitespace-nowrap">
