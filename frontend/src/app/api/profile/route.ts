@@ -19,7 +19,7 @@ export async function GET() {
     .select(
       `
       id, full_name, email, role, team_id, is_team_leader, contact_phone, avatar_url,
-      teams ( name ),
+      teams!team_id ( name ),
       ambassador_profiles (
         programme, programme_type, academic_year, majors, previous_qualification,
         favourite_courses, languages, origin_country, origin_flag, bio_short, bio_full,

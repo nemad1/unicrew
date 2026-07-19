@@ -26,7 +26,12 @@ type InternalUser = {
   teams: { id: string; name: string } | null;
 };
 
-type Team = { id: string; name: string };
+type Team = {
+  id: string;
+  name: string;
+  accent_color: string | null;
+  lead: { id: string; full_name: string } | null;
+};
 
 function StatusBadge({ role }: { role: string }) {
   const styles = {
@@ -203,7 +208,16 @@ export default function UserManagementPage() {
     fetch("/api/admin/teams")
       .then((res) => res.json())
       .then((data) => {
-        if (Array.isArray(data)) setTeams(data);
+        if (Array.isArray(data)) {
+          setTeams(
+            data.map((t: any) => ({
+              id: t.id,
+              name: t.name,
+              accent_color: t.accent_color || null,
+              lead: Array.isArray(t.lead) ? t.lead[0] || null : t.lead || null,
+            }))
+          );
+        }
       })
       .catch(console.error);
   }, [fetchUsers]);
@@ -413,17 +427,28 @@ export default function UserManagementPage() {
             <p className="text-xs mt-1">Click "Add New User" to create one.</p>
           </div>
         ) : (
-          Object.entries(teamGroups).map(([teamKey, group], gi) => (
+          Object.entries(teamGroups).map(([teamKey, group], gi) => {
+            const teamMeta = teams.find((t) => t.id === teamKey);
+            return (
             <div key={teamKey}>
               {/* Team Header */}
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-6 h-6 rounded bg-gray-100 flex items-center justify-center">
-                  <Users className="w-3.5 h-3.5 text-gray-500" />
+              <div className="flex items-center gap-2 mb-1">
+                <div
+                  className="w-6 h-6 rounded flex items-center justify-center"
+                  style={{ backgroundColor: teamMeta?.accent_color ? `${teamMeta.accent_color}1a` : "#f3f4f6" }}
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: teamMeta?.accent_color || "#9ca3af" }}
+                  />
                 </div>
                 <h3 className="text-sm font-semibold text-gray-700">{group.teamName}</h3>
                 <span className="text-xs text-gray-400">
                   ({group.members.length} member{group.members.length !== 1 ? "s" : ""})
                 </span>
+                {teamMeta?.lead && (
+                  <span className="text-xs text-gray-400">· Lead: {teamMeta.lead.full_name}</span>
+                )}
               </div>
 
               {/* Team Table */}
@@ -530,7 +555,8 @@ export default function UserManagementPage() {
                 </table>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 

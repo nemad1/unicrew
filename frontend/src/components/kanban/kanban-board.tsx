@@ -807,7 +807,7 @@ export function KanbanBoard({
 
   // Team-scoped board state
   const [ambassadors, setAmbassadors] = useState<BoardAmbassador[]>([]);
-  const [availableTeams, setAvailableTeams] = useState<{ id: string; name: string }[]>([]);
+  const [availableTeams, setAvailableTeams] = useState<{ id: string; name: string; accent_color: string | null }[]>([]);
   const [currentBoard, setCurrentBoard] = useState<{ id: string; name: string; team_id: string | null } | null>(null);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [viewerId, setViewerId] = useState<string | null>(null);
@@ -1200,7 +1200,15 @@ export function KanbanBoard({
             </SelectTrigger>
             <SelectContent>
               {availableTeams.map((t) => (
-                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                <SelectItem key={t.id} value={t.id}>
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: t.accent_color || "#9ca3af" }}
+                    />
+                    {t.name}
+                  </span>
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>

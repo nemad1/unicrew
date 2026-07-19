@@ -40,25 +40,24 @@ export function EditUserModal({ user, onClose, onUpdated }: EditUserModalProps) 
   const [teamId, setTeamId] = useState<string>("");
   const [isTeamLeader, setIsTeamLeader] = useState(false);
 
+  // teamId is only set once the teams list has loaded — setting a Select's
+  // controlled value before its matching SelectItem exists causes Radix to
+  // treat it as unrecognized and reset the value to "" on its own, silently
+  // clearing the field even though the user never touched it.
   useEffect(() => {
-    if (user) {
-      setFullName(user.full_name);
-      setRole(user.role === "admin" ? "counselor" : user.role);
-      setTeamId(user.team_id || "");
-      setIsTeamLeader(user.is_team_leader);
-      setError(null);
-    }
-  }, [user]);
+    if (!user) return;
+    setFullName(user.full_name);
+    setRole(user.role === "admin" ? "counselor" : user.role);
+    setIsTeamLeader(user.is_team_leader);
+    setError(null);
 
-  useEffect(() => {
-    if (user) {
-      fetch("/api/admin/teams")
-        .then((res) => res.json())
-        .then((data) => {
-          if (Array.isArray(data)) setTeams(data);
-        })
-        .catch(console.error);
-    }
+    fetch("/api/admin/teams")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) setTeams(data);
+        setTeamId(user.team_id || "");
+      })
+      .catch(console.error);
   }, [user]);
 
   if (!user) return null;
@@ -159,18 +158,31 @@ export function EditUserModal({ user, onClose, onUpdated }: EditUserModalProps) 
 
             <div className="space-y-1.5">
               <Label className="text-xs text-gray-600">Team</Label>
-              <Select value={teamId} onValueChange={setTeamId} disabled={loading}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select team" />
-                </SelectTrigger>
-                <SelectContent>
-                  {teams.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Mounting the Select before `teams` has loaded lets Radix see
+                  a `value` with no matching SelectItem yet (SelectContent's
+                  items don't exist until then) and it silently resets the
+                  value to "" to "self-correct" — wiping a real team
+                  assignment on save even though the user never touched this
+                  field. Waiting for teams to load before this ever mounts
+                  avoids that entirely. */}
+              {teams.length === 0 ? (
+                <div className="h-9 flex items-center px-3 text-xs text-gray-400 border border-gray-200 rounded-md">
+                  Loading teams...
+                </div>
+              ) : (
+                <Select value={teamId} onValueChange={setTeamId} disabled={loading}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select team" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {teams.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           </div>
 

@@ -81,10 +81,13 @@ export async function GET(request: Request) {
 
     // Admins get the full team list (plus the legacy "Unassigned" board) to
     // power a board switcher
-    let availableTeams: { id: string; name: string }[] = [];
+    let availableTeams: { id: string; name: string; accent_color: string | null }[] = [];
     if (profile.role === 'admin') {
-      const { data: teams } = await supabase.from('teams').select('id, name').order('name');
-      availableTeams = [...(teams || []), { id: UNASSIGNED_TEAM_VALUE, name: 'Unassigned (no team)' }];
+      const { data: teams } = await supabase.from('teams').select('id, name, accent_color').order('name');
+      availableTeams = [
+        ...(teams || []),
+        { id: UNASSIGNED_TEAM_VALUE, name: 'Unassigned (no team)', accent_color: null },
+      ];
     }
 
     // Real team ambassadors, to back the "Assign ambassador" menu and the

@@ -11,9 +11,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/contexts/auth-context";
 import { AmbassadorCard } from "@/components/peers/AmbassadorCard";
 import { AmbassadorFullProfileModal } from "@/components/peers/AmbassadorFullProfileModal";
 import type { PeerUser } from "@/components/peers/types";
+
+type TeamMeta = {
+  id: string;
+  name: string;
+  accent_color: string | null;
+  lead: { id: string; full_name: string } | null;
+};
+
+type TeamStats = { avg_rating: number | null; ambassador_count: number };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -29,11 +39,17 @@ function getInitials(name: string): string {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function PeersPage() {
+  const { role: viewerRole } = useAuth();
+  const isStaffViewer = viewerRole !== "ambassador";
+
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
+  const [teamFilter, setTeamFilter] = useState("all");
   const [selectedUser, setSelectedUser] = useState<PeerUser | null>(null);
-  
+
   const [users, setUsers] = useState<PeerUser[]>([]);
+  const [teamsMeta, setTeamsMeta] = useState<TeamMeta[]>([]);
+  const [teamStats, setTeamStats] = useState<Record<string, TeamStats>>({});
   const [loading, setLoading] = useState(true);
 
   const supabase = createClient();
@@ -54,7 +70,7 @@ export default function PeersPage() {
             is_team_leader,
             team_id,
             contact_phone,
-            teams ( id, name ),
+            teams!team_id ( id, name ),
             ambassador_profiles (
               avatar_colour,
               programme,
@@ -121,12 +137,60 @@ export default function PeersPage() {
     fetchPeers();
   }, [supabase]);
 
+  useEffect(() => {
+    fetch("/api/admin/teams")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setTeamsMeta(
+            data.map((t: any) => ({
+              id: t.id,
+              name: t.name,
+              accent_color: t.accent_color || null,
+              lead: Array.isArray(t.lead) ? t.lead[0] || null : t.lead || null,
+            }))
+          );
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  // Staff-only per-team rating rollup, once we know which teams have members
+  useEffect(() => {
+    if (!isStaffViewer) return;
+    const teamIds = Array.from(new Set(users.map((u) => u.teamId).filter(Boolean))) as string[];
+    if (teamIds.length === 0) return;
+
+    Promise.all(
+      teamIds.map((id) =>
+        fetch(`/api/teams/${id}/stats`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((stats) => [id, stats] as const)
+      )
+    ).then((results) => {
+      setTeamStats((prev) => {
+        const next = { ...prev };
+        results.forEach(([id, stats]) => {
+          if (stats) next[id] = stats;
+        });
+        return next;
+      });
+    });
+  }, [isStaffViewer, users]);
+
   // Grouping logic
   const filteredUsers = users.filter((u) => {
-    const matchesSearch = u.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch = u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           u.email.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRole = roleFilter === "all" || u.role === roleFilter;
-    return matchesSearch && matchesRole;
+    const matchesTeam = teamFilter === "all" || u.teamName === teamFilter;
+    return matchesSearch && matchesRole && matchesTeam;
+  });
+
+  const teamFilterOptions = Array.from(new Set(users.map((u) => u.teamName))).sort((a, b) => {
+    if (a === "Unassigned") return 1;
+    if (b === "Unassigned") return -1;
+    return a.localeCompare(b);
   });
 
   const groupedUsers = filteredUsers.reduce((acc, user) => {
@@ -187,6 +251,21 @@ export default function PeersPage() {
                 <SelectItem value="ambassador">Ambassadors</SelectItem>
               </SelectContent>
             </Select>
+            {teamFilterOptions.length > 1 && (
+              <Select value={teamFilter} onValueChange={setTeamFilter}>
+                <SelectTrigger className="w-full sm:w-[180px] bg-white border-gray-200 shadow-sm focus:ring-4 focus:ring-blue-500/10">
+                  <SelectValue placeholder="All Teams" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Teams</SelectItem>
+                  {teamFilterOptions.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         </div>
       </div>
@@ -215,16 +294,30 @@ export default function PeersPage() {
               return a.name.localeCompare(b.name);
             });
 
+            const meta = teamsMeta.find((t) => t.name === teamName);
+            const teamId = teamMembers[0]?.teamId;
+            const stats = teamId ? teamStats[teamId] : undefined;
+
             return (
               <section key={teamName} className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex items-center gap-3 mb-6">
+                <div className="flex items-center gap-3 mb-1.5">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: meta?.accent_color || "#9ca3af" }}
+                  />
                   <h2 className="text-xl font-bold text-gray-900">{teamName}</h2>
                   <span className="bg-gray-200 text-gray-700 py-0.5 px-2.5 rounded-full text-xs font-semibold">
                     {teamMembers.length}
                   </span>
                   <div className="h-px bg-gray-200 flex-1 ml-4" />
                 </div>
-                
+                <div className="flex items-center gap-3 mb-4 pl-5 text-xs text-gray-500">
+                  {meta?.lead && <span>Lead: {meta.lead.full_name}</span>}
+                  {isStaffViewer && stats && stats.avg_rating !== null && (
+                    <span>Avg rating: {stats.avg_rating}</span>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                   {teamMembers.map((user) => (
                     <AmbassadorCard key={user.id} user={user} onSelect={setSelectedUser} />

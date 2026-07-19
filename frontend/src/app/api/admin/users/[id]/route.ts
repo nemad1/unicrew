@@ -66,6 +66,13 @@ export async function PATCH(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  // Toggling "Team Leader" on is the only control for who a team's lead is
+  // (no dedicated Team Management UI exists yet) — keep teams.lead_id in
+  // sync so Kanban/Directory/User Management can all show one real lead.
+  if (is_team_leader === true && data.team_id) {
+    await adminClient.from("teams").update({ lead_id: data.id }).eq("id", data.team_id);
+  }
+
   return NextResponse.json({ success: true, user: data });
 }
 
