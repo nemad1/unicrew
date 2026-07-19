@@ -57,9 +57,27 @@ export async function GET() {
       is_team_leader,
       is_active,
       created_at,
+      contact_phone,
+      avatar_url,
       teams!team_id (
         id,
         name
+      ),
+      ambassador_profiles (
+        programme,
+        programme_type,
+        academic_year,
+        majors,
+        previous_qualification,
+        favourite_courses,
+        languages,
+        origin_country,
+        origin_flag,
+        bio_short,
+        bio_full,
+        hobbies,
+        clubs_societies,
+        availability_schedule
       )
     `
     )

@@ -49,6 +49,7 @@ export type PeerUser = {
   online?: boolean;
   availability?: AvailabilityEntry[];
   contactPhone?: string | null;
+  avatarUrl?: string | null;
 };
 
 export const DAY_LABELS: Record<AvailabilityDay, string> = {

@@ -38,8 +38,13 @@ export function AmbassadorFullProfileModal({
           {/* Header Banner */}
           <div className={cn("p-6 pb-20 flex items-start justify-between gap-4", isCounselor ? "bg-slate-700" : user.colour.split(' ')[0].replace('100', '700'))}>
             <div className="flex items-center gap-4">
-              <div className={cn("w-24 h-24 rounded-2xl flex items-center justify-center text-3xl font-bold border-4 border-white shadow-lg text-white", isCounselor ? "bg-slate-600" : user.colour.split(' ')[0].replace('100', '600'))}>
-                {user.initials}
+              <div className={cn("w-24 h-24 rounded-2xl flex items-center justify-center text-3xl font-bold border-4 border-white shadow-lg text-white overflow-hidden", isCounselor ? "bg-slate-600" : user.colour.split(' ')[0].replace('100', '600'))}>
+                {user.avatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={user.avatarUrl} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  user.initials
+                )}
               </div>
               <div className="text-white">
                 <div className="flex items-center gap-2">

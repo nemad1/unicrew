@@ -42,11 +42,16 @@ export function AmbassadorCard({
       <div className="px-5 pt-0 pb-4 flex flex-col items-center -mt-10 relative z-10 flex-1">
         <div
           className={cn(
-            "w-20 h-20 rounded-2xl flex items-center justify-center text-2xl font-bold shadow-md border-4 border-white mb-3",
+            "w-20 h-20 rounded-2xl flex items-center justify-center text-2xl font-bold shadow-md border-4 border-white mb-3 overflow-hidden",
             isCounselor ? "bg-slate-200 text-slate-700" : user.colour,
           )}
         >
-          {user.initials}
+          {user.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={user.avatarUrl} alt="" className="w-full h-full object-cover" />
+          ) : (
+            user.initials
+          )}
         </div>
         <div className="text-center mb-1 w-full flex items-center justify-center gap-1.5">
           <h3 className="font-bold text-gray-900 text-lg truncate">{user.name}</h3>

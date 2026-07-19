@@ -40,7 +40,7 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await request.json();
-  const { full_name, role, team_id, is_team_leader } = body;
+  const { full_name, role, team_id, is_team_leader, contact_phone, avatar_url, ambassador_profile } = body;
 
   const adminClient = getAdminClient();
 
@@ -50,20 +50,64 @@ export async function PATCH(
   if (role !== undefined) updates.role = role;
   if (team_id !== undefined) updates.team_id = team_id;
   if (is_team_leader !== undefined) updates.is_team_leader = is_team_leader;
+  if (contact_phone !== undefined) updates.contact_phone = contact_phone || null;
+  if (avatar_url !== undefined) updates.avatar_url = avatar_url || null;
 
-  if (Object.keys(updates).length === 0) {
+  if (Object.keys(updates).length === 0 && !ambassador_profile) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
-  const { data, error } = await adminClient
-    .from("internal_users")
-    .update(updates)
-    .eq("id", id)
-    .select()
-    .single();
+  let data: any = null;
+  if (Object.keys(updates).length > 0) {
+    const { data: updated, error } = await adminClient
+      .from("internal_users")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    data = updated;
+  } else {
+    const { data: existing } = await adminClient.from("internal_users").select().eq("id", id).single();
+    data = existing;
+  }
+
+  // Peer Directory content (bio, academic info, languages, hobbies, clubs,
+  // favourite courses, origin/flag) is admin-managed — everything here
+  // except availability_schedule/is_online, which ambassadors self-edit
+  // via /api/profile.
+  if (ambassador_profile) {
+    const allowedFields = [
+      "programme",
+      "programme_type",
+      "academic_year",
+      "majors",
+      "previous_qualification",
+      "favourite_courses",
+      "languages",
+      "origin_country",
+      "origin_flag",
+      "bio_short",
+      "bio_full",
+      "hobbies",
+      "clubs_societies",
+    ];
+    const profileUpdates: Record<string, unknown> = {};
+    for (const field of allowedFields) {
+      if (ambassador_profile[field] !== undefined) profileUpdates[field] = ambassador_profile[field];
+    }
+    if (Object.keys(profileUpdates).length > 0) {
+      const { error: profileError } = await adminClient
+        .from("ambassador_profiles")
+        .update(profileUpdates)
+        .eq("user_id", id);
+      if (profileError) {
+        return NextResponse.json({ error: profileError.message }, { status: 500 });
+      }
+    }
   }
 
   // Toggling "Team Leader" on is the only control for who a team's lead is

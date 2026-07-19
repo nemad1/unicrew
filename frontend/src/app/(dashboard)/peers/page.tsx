@@ -70,6 +70,7 @@ export default function PeersPage() {
             is_team_leader,
             team_id,
             contact_phone,
+            avatar_url,
             teams!team_id ( id, name ),
             ambassador_profiles (
               avatar_colour,
@@ -123,6 +124,7 @@ export default function PeersPage() {
             online: profile.is_online || false,
             availability: profile.availability_schedule || [],
             contactPhone: u.contact_phone || null,
+            avatarUrl: u.avatar_url || null,
           };
         });
 

@@ -50,46 +50,28 @@ export async function PUT(request: Request) {
 
   const body = await request.json();
 
-  const userUpdates: Record<string, unknown> = {};
-  if (body.contact_phone !== undefined) userUpdates.contact_phone = body.contact_phone || null;
-  if (body.avatar_url !== undefined) userUpdates.avatar_url = body.avatar_url || null;
+  // Everything shown in the Peer Directory (avatar, contact number, bio,
+  // academic info, languages, hobbies, clubs, favourite courses, origin/flag)
+  // is admin-managed content — see /api/admin/users. Ambassadors self-edit
+  // only their weekly availability; admins/counselors still self-edit their
+  // own contact_phone/avatar_url since nothing else manages those for them.
+  if (caller.role !== "ambassador") {
+    const userUpdates: Record<string, unknown> = {};
+    if (body.contact_phone !== undefined) userUpdates.contact_phone = body.contact_phone || null;
+    if (body.avatar_url !== undefined) userUpdates.avatar_url = body.avatar_url || null;
 
-  if (Object.keys(userUpdates).length > 0) {
-    const { error } = await supabase.from("internal_users").update(userUpdates).eq("id", user.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  if (caller.role === "ambassador" && body.ambassador_profile) {
-    const allowedFields = [
-      "programme",
-      "programme_type",
-      "academic_year",
-      "majors",
-      "previous_qualification",
-      "favourite_courses",
-      "languages",
-      "origin_country",
-      "origin_flag",
-      "bio_short",
-      "bio_full",
-      "hobbies",
-      "clubs_societies",
-      "availability_schedule",
-    ];
-    const profileUpdates: Record<string, unknown> = {};
-    for (const field of allowedFields) {
-      if (body.ambassador_profile[field] !== undefined) {
-        profileUpdates[field] = body.ambassador_profile[field];
-      }
-    }
-
-    if (Object.keys(profileUpdates).length > 0) {
-      const { error } = await supabase
-        .from("ambassador_profiles")
-        .update(profileUpdates)
-        .eq("user_id", user.id);
+    if (Object.keys(userUpdates).length > 0) {
+      const { error } = await supabase.from("internal_users").update(userUpdates).eq("id", user.id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
+  }
+
+  if (caller.role === "ambassador" && body.ambassador_profile?.availability_schedule !== undefined) {
+    const { error } = await supabase
+      .from("ambassador_profiles")
+      .update({ availability_schedule: body.ambassador_profile.availability_schedule })
+      .eq("user_id", user.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });

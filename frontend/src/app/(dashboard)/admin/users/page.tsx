@@ -23,7 +23,27 @@ type InternalUser = {
   is_team_leader: boolean;
   is_active: boolean;
   created_at: string;
+  contact_phone: string | null;
+  avatar_url: string | null;
   teams: { id: string; name: string } | null;
+  ambassador_profiles:
+    | {
+        programme: string | null;
+        programme_type: string | null;
+        academic_year: string | null;
+        majors: string | null;
+        previous_qualification: string | null;
+        favourite_courses: string[] | null;
+        languages: string[] | null;
+        origin_country: string | null;
+        origin_flag: string | null;
+        bio_short: string | null;
+        bio_full: string | null;
+        hobbies: string[] | null;
+        clubs_societies: { name: string; role: string | null }[] | null;
+      }
+    | { [key: string]: unknown }[]
+    | null;
 };
 
 type Team = {
@@ -566,7 +586,11 @@ export default function UserManagementPage() {
         onCreated={fetchUsers}
       />
 
+      {/* key forces a clean remount per edited user so the modal's lazily-
+          initialized form state (and Radix's Selects) always start correct
+          instead of trying to resync into an already-mounted instance. */}
       <EditUserModal
+        key={editingUser?.id ?? "none"}
         user={editingUser}
         onClose={() => setEditingUser(null)}
         onUpdated={fetchUsers}
