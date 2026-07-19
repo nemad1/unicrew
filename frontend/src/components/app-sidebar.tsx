@@ -19,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Calendar } from "@/components/ui/calendar";
 import { useAuth } from "@/contexts/auth-context";
+import { ShiftClockToggle } from "@/components/peers/ShiftClockToggle";
 import type { Role } from "@/types/roles";
 
 const getNavItems = (role: Role) => {
@@ -210,6 +211,8 @@ export function AppSidebar() {
           collapsed ? "px-2 py-3" : "p-3",
         )}
       >
+        {role === "ambassador" && <ShiftClockToggle collapsed={collapsed} />}
+
         {bottomNavItems.map((item) => {
           const Icon = item.icon;
           const active = isActive(item.href);

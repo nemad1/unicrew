@@ -11,7 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Role } from "@/types/roles";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
+import type { AuthChangeEvent, Session, User as SupabaseUser } from "@supabase/supabase-js";
 
 export interface InternalUser {
   id: string;
@@ -48,7 +48,7 @@ function getInitials(name: string): string {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const supabase = createClient();
+  const [supabase] = useState(() => createClient());
 
   const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
   const [internalUser, setInternalUser] = useState<InternalUser | null>(null);
@@ -105,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Listen for auth state changes (sign in, sign out, token refresh)
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       if (event === "SIGNED_IN" && session?.user) {
         setAuthUser(session.user);
         const profile = await fetchInternalUser(session.user.id);

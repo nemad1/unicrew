@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Search, Users, Crown, Loader2, BookOpen, MapPin, Award, Star, Clock, Calendar, MessageSquare, Plus, ChevronDown, ChevronUp, AlertTriangle, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Search, Users, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -11,40 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type ProgrammeType = "Undergraduate" | "Masters" | "PhD";
-
-type PeerUser = {
-  id: string;
-  name: string;
-  email: string;
-  role: "counselor" | "ambassador" | "admin";
-  initials: string;
-  isTeamLeader: boolean;
-  teamId: string | null;
-  teamName: string;
-  
-  // Ambassador specific data
-  colour: string; 
-  programme?: string; 
-  programmeType?: ProgrammeType | string;
-  year?: string;
-  languages?: string;
-  from?: string;
-  fromFlag?: string;
-  qualification?: string;
-  majors?: string;
-  bio?: string;
-  bioFull?: string;
-  hobbies?: string[];
-  clubs?: string;
-  favouriteCourses?: string[];
-  online?: boolean;
-};
+import { AmbassadorCard } from "@/components/peers/AmbassadorCard";
+import { AmbassadorFullProfileModal } from "@/components/peers/AmbassadorFullProfileModal";
+import type { PeerUser } from "@/components/peers/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -55,252 +24,6 @@ function getInitials(name: string): string {
     .join("")
     .toUpperCase()
     .slice(0, 2);
-}
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function AmbassadorCard({ user, onSelect }: { user: PeerUser; onSelect: (u: PeerUser) => void }) {
-  const isCounselor = user.role === "counselor";
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col group h-full">
-      {/* Top Banner (Colour logic) */}
-      <div className={cn("h-16 relative", isCounselor ? "bg-slate-100" : user.colour.split(' ')[0])}>
-        {/* Status Dot */}
-        <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-full shadow-sm">
-          <div
-            className={cn(
-              "w-2 h-2 rounded-full",
-              user.online ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" : "bg-gray-300"
-            )}
-          />
-          <span className="text-[10px] font-medium text-gray-700">
-            {user.online ? "Online" : "Offline"}
-          </span>
-        </div>
-      </div>
-
-      {/* Avatar & Basic Info */}
-      <div className="px-5 pt-0 pb-4 flex flex-col items-center -mt-10 relative z-10 flex-1">
-        <div
-          className={cn(
-            "w-20 h-20 rounded-2xl flex items-center justify-center text-2xl font-bold shadow-md border-4 border-white mb-3",
-            isCounselor ? "bg-slate-200 text-slate-700" : user.colour,
-          )}
-        >
-          {user.initials}
-        </div>
-        <div className="text-center mb-1 w-full flex items-center justify-center gap-1.5">
-          <h3 className="font-bold text-gray-900 text-lg truncate">{user.name}</h3>
-          {user.isTeamLeader && (
-            <div className="bg-amber-100 text-amber-700 p-1 rounded-md" title="Team Leader">
-              <Crown className="w-3.5 h-3.5" />
-            </div>
-          )}
-        </div>
-        <p className="text-xs text-gray-500 mb-3 text-center">
-          {user.role === "counselor" ? "Admissions Counselor" : "Student Ambassador"}
-        </p>
-
-        {/* Dynamic Tags */}
-        {!isCounselor && (
-          <div className="flex flex-wrap items-center justify-center gap-1.5 mb-4">
-            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-[10px] font-medium">
-              <BookOpen className="w-3 h-3 mr-1" />
-              {user.programmeType || "Student"}
-            </span>
-            {user.from && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 text-[10px] font-medium">
-                {user.fromFlag && <span className="mr-1">{user.fromFlag}</span>}
-                {user.from}
-              </span>
-            )}
-            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 text-[10px] font-medium">
-              <Star className="w-3 h-3 mr-1" />
-              {user.year || "Enrolled"}
-            </span>
-          </div>
-        )}
-
-        {/* Bio Preview */}
-        {!isCounselor && user.bio && (
-          <p className="text-xs text-gray-600 text-center line-clamp-3 mb-4 leading-relaxed">
-            "{user.bio}"
-          </p>
-        )}
-        
-        {isCounselor && (
-          <div className="flex flex-col items-center gap-2 mt-2 text-sm text-gray-600">
-            <p>{user.email}</p>
-          </div>
-        )}
-
-        <div className="mt-auto pt-4 w-full">
-          <Button
-            onClick={() => onSelect(user)}
-            variant="outline"
-            className="w-full text-blue-700 border-blue-200 hover:bg-blue-50 hover:text-blue-800 transition-colors"
-          >
-            {isCounselor ? "View Details" : "View Full Profile"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AmbassadorModal({ user, onClose }: { user: PeerUser; onClose: () => void }) {
-  const isCounselor = user.role === "counselor";
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-      <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
-      
-      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-black/10 hover:bg-black/20 text-white z-20 transition-colors"
-        >
-          <X className="w-4 h-4" />
-        </button>
-
-        <div className="overflow-y-auto flex-1">
-          {/* Header Banner */}
-          <div className={cn("h-32 p-6 flex items-end", isCounselor ? "bg-slate-700" : user.colour.split(' ')[0].replace('100', '700'))}>
-            <div className="flex items-center gap-4 translate-y-12">
-              <div className={cn("w-24 h-24 rounded-2xl flex items-center justify-center text-3xl font-bold border-4 border-white shadow-lg text-white", isCounselor ? "bg-slate-600" : user.colour.split(' ')[0].replace('100', '600'))}>
-                {user.initials}
-              </div>
-              <div className="pb-1 text-white">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-2xl font-bold drop-shadow-md">{user.name}</h2>
-                  {user.isTeamLeader && (
-                    <div className="bg-amber-400 text-amber-900 px-2 py-0.5 rounded text-xs font-bold shadow-sm flex items-center gap-1">
-                      <Crown className="w-3 h-3" />
-                      Team Leader
-                    </div>
-                  )}
-                </div>
-                <p className="text-white/90 text-sm font-medium drop-shadow-sm">
-                  {user.role === "counselor" ? "Admissions Counselor" : "Student Ambassador"} • {user.teamName}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="px-6 pt-16 pb-8">
-            <div className="flex flex-col md:flex-row gap-8">
-              {/* Left Column: Details */}
-              <div className="flex-1 space-y-6">
-                {!isCounselor && (
-                  <>
-                    <div>
-                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">About Me</h4>
-                      <p className="text-sm text-gray-700 leading-relaxed">
-                        {user.bioFull || user.bio || "No biography provided."}
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="bg-gray-50 rounded-xl p-4">
-                        <div className="flex items-center gap-2 text-blue-700 mb-1">
-                          <BookOpen className="w-4 h-4" />
-                          <span className="text-xs font-semibold">Programme</span>
-                        </div>
-                        <p className="text-sm font-medium text-gray-900">{user.programme || "Not specified"}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">{user.year || "Enrolled"}</p>
-                      </div>
-                      
-                      <div className="bg-gray-50 rounded-xl p-4">
-                        <div className="flex items-center gap-2 text-emerald-700 mb-1">
-                          <MapPin className="w-4 h-4" />
-                          <span className="text-xs font-semibold">From</span>
-                        </div>
-                        <p className="text-sm font-medium text-gray-900">
-                          {user.fromFlag && <span className="mr-1.5">{user.fromFlag}</span>}
-                          {user.from || "Not specified"}
-                        </p>
-                      </div>
-                    </div>
-
-                    {user.favouriteCourses && user.favouriteCourses.length > 0 && (
-                      <div>
-                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Favourite Courses</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {user.favouriteCourses.map((course, idx) => (
-                            <span key={idx} className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-2.5 py-1 rounded-md text-xs font-medium">
-                              {course}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {isCounselor && (
-                  <div>
-                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Contact Details</h4>
-                    <p className="text-sm text-gray-700">{user.email}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Right Column: Meta & Actions */}
-              <div className="w-full md:w-64 shrink-0 space-y-4">
-                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-                  <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-3">Connect</h4>
-                  <Button className="w-full bg-blue-700 hover:bg-blue-800 text-white mb-2 shadow-sm">
-                    <MessageSquare className="w-4 h-4 mr-2" />
-                    Internal Chat
-                  </Button>
-                  <Button variant="outline" className="w-full bg-white text-blue-700 border-blue-200 hover:bg-blue-50">
-                    <Calendar className="w-4 h-4 mr-2" />
-                    View Schedule
-                  </Button>
-                </div>
-
-                {!isCounselor && (
-                  <div className="bg-gray-50 rounded-xl p-4 space-y-4">
-                    {user.languages && (
-                      <div>
-                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Languages</h4>
-                        <p className="text-sm text-gray-700 font-medium">{user.languages}</p>
-                      </div>
-                    )}
-                    {user.qualification && (
-                      <div>
-                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Previous Qual.</h4>
-                        <p className="text-sm text-gray-700 font-medium">{user.qualification}</p>
-                      </div>
-                    )}
-                    {user.majors && (
-                      <div>
-                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Majors/Minors</h4>
-                        <p className="text-sm text-gray-700 font-medium">{user.majors}</p>
-                      </div>
-                    )}
-                    {user.hobbies && user.hobbies.length > 0 && (
-                      <div>
-                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Interests</h4>
-                        <div className="flex flex-wrap gap-1.5">
-                          {user.hobbies.map((hobby, i) => (
-                            <span key={i} className="text-xs bg-white border border-gray-200 px-2 py-0.5 rounded-md text-gray-600">
-                              {hobby}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -346,7 +69,8 @@ export default function PeersPage() {
               hobbies,
               clubs_societies,
               favourite_courses,
-              is_online
+              is_online,
+              availability_schedule
             )
           `)
           .order("full_name");
@@ -355,7 +79,7 @@ export default function PeersPage() {
 
         const mapped: PeerUser[] = (data || []).map((u: any) => {
           const profile = u.ambassador_profiles || {};
-          
+
           return {
             id: u.id,
             name: u.full_name,
@@ -377,9 +101,10 @@ export default function PeersPage() {
             bio: profile.bio_short || "",
             bioFull: profile.bio_full || "",
             hobbies: profile.hobbies || [],
-            clubs: profile.clubs_societies || "",
+            clubs: profile.clubs_societies || [],
             favouriteCourses: profile.favourite_courses || [],
             online: profile.is_online || false,
+            availability: profile.availability_schedule || [],
           };
         });
 
@@ -510,7 +235,7 @@ export default function PeersPage() {
       </div>
 
       {selectedUser && (
-        <AmbassadorModal user={selectedUser} onClose={() => setSelectedUser(null)} />
+        <AmbassadorFullProfileModal user={selectedUser} onClose={() => setSelectedUser(null)} />
       )}
     </div>
   );

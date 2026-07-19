@@ -93,6 +93,66 @@ app.get('/api/whatsapp/status', async (req, res) => {
     }
 });
 
+// Proxy routes for Next.js to call OpenWA gateway
+const OPENWA_HEADERS = { 'Content-Type': 'application/json', 'X-API-Key': process.env.OPENWA_API_KEY };
+
+app.get('/api/whatsapp/chats', async (req, res) => {
+    const { sessionId } = req.query;
+    if (!sessionId) return res.status(400).json({ error: 'sessionId is required' });
+    try {
+        const fetchRes = await fetch(`${process.env.OPENWA_API_URL}/api/sessions/${sessionId}/chats`, { headers: OPENWA_HEADERS });
+        const data = await fetchRes.json();
+        res.status(fetchRes.status).json(data);
+    } catch (err) { res.status(500).json({ error: "Internal Error" }); }
+});
+
+app.get('/api/whatsapp/messages', async (req, res) => {
+    const { sessionId, chatId, limit = '100' } = req.query;
+    if (!sessionId || !chatId) return res.status(400).json({ error: 'sessionId and chatId are required' });
+    try {
+        const fetchRes = await fetch(`${process.env.OPENWA_API_URL}/api/sessions/${sessionId}/messages?chatId=${encodeURIComponent(chatId)}&limit=${limit}`, { headers: OPENWA_HEADERS });
+        const data = await fetchRes.json();
+        res.status(fetchRes.status).json(data);
+    } catch (err) { res.status(500).json({ error: "Internal Error" }); }
+});
+
+app.post('/api/whatsapp/send', async (req, res) => {
+    const { sessionId, chatId, text } = req.body;
+    if (!sessionId || !chatId || !text) return res.status(400).json({ error: 'Missing parameters' });
+    try {
+        const fetchRes = await fetch(`${process.env.OPENWA_API_URL}/api/sessions/${sessionId}/messages/send-text`, {
+            method: 'POST',
+            headers: OPENWA_HEADERS,
+            body: JSON.stringify({ chatId, text })
+        });
+        const data = await fetchRes.json().catch(() => ({}));
+        res.status(fetchRes.status).json(data);
+    } catch (err) { res.status(500).json({ error: "Internal Error" }); }
+});
+
+app.post('/api/whatsapp/send-media', async (req, res) => {
+    const { sessionId, chatId, fileBase64, fileName, caption } = req.body;
+    if (!sessionId || !chatId || !fileBase64) return res.status(400).json({ error: 'Missing parameters' });
+    try {
+        const matches = fileBase64.match(/^data:(.+);base64,(.+)$/);
+        if (!matches) return res.status(400).json({ error: 'Invalid base64 file format' });
+        const mimetype = matches[1];
+        const rawBase64 = matches[2];
+        let endpointPath = 'send-document';
+        if (mimetype.startsWith('image/')) endpointPath = 'send-image';
+        else if (mimetype.startsWith('video/')) endpointPath = 'send-video';
+        else if (mimetype.startsWith('audio/')) endpointPath = 'send-audio';
+
+        const fetchRes = await fetch(`${process.env.OPENWA_API_URL}/api/sessions/${sessionId}/messages/${endpointPath}`, {
+            method: 'POST',
+            headers: OPENWA_HEADERS,
+            body: JSON.stringify({ chatId, base64: rawBase64, filename: fileName || 'file', caption: caption || '', mimetype })
+        });
+        const data = await fetchRes.json().catch(() => ({}));
+        res.status(fetchRes.status).json(data);
+    } catch (err) { res.status(500).json({ error: "Internal Error" }); }
+});
+
 app.post('/api/whatsapp/sync', async (req, res) => {
     const { userId } = req.body;
     if (!userId) return res.status(400).json({ error: 'userId is required' });
@@ -100,7 +160,7 @@ app.post('/api/whatsapp/sync', async (req, res) => {
     try {
         console.log(`[${userId}] Starting Chat Sync from Railway OpenWA...`);
         // 1. Fetch all chats
-        const chats = await fetchAllChats();
+        const chats = await fetchAllChats(userId);
         console.log(`Found ${chats.length} total chats. Limiting sync to the most recent 50 chats.`);
         
         // Limit to 50
@@ -147,7 +207,7 @@ app.post('/api/whatsapp/sync', async (req, res) => {
             }
 
             // Sync recent messages for this chat (limit 5 per chat)
-            const msgs = await getChatMessages(chat.id, 5);
+            const msgs = await getChatMessages(userId, chat.id, 5);
             for (const msg of msgs) {
                 // OpenWA message object has: id, body, fromMe, timestamp
                 const content = msg.body || msg.content || msg.text || msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
@@ -225,13 +285,31 @@ app.post('/webhook', async (req, res) => {
             // 1. Check if contact exists in the CRM
             const { data: contact, error: contactError } = await supabase
                 .from('contacts')
-                .select('id, ai_summary, fields')
+                .select('id, ai_summary, fields, pending_feedback_for')
                 .eq('phone_number', from)
                 .single();
 
             if (contactError || !contact) {
                 // Unknown contact, silently ignore
                 return res.status(200).send('Webhook processed (ignored unknown contact)');
+            }
+
+            // 1b. If we're waiting on a post-enrollment rating from this contact,
+            // treat a bare 1-5 reply as feedback for the ambassador instead of a
+            // normal chat message, and stop here.
+            if (contact.pending_feedback_for && /^[1-5]$/.test(extractedBody.trim())) {
+                await supabase.from('ambassador_feedback').insert({
+                    contact_id: contact.id,
+                    user_id: contact.pending_feedback_for,
+                    rating: parseInt(extractedBody.trim(), 10),
+                });
+                await supabase
+                    .from('contacts')
+                    .update({ pending_feedback_for: null })
+                    .eq('id', contact.id);
+
+                console.log(`Recorded ambassador feedback from ${from}`);
+                return res.status(200).send('Webhook processed (feedback recorded)');
             }
 
             // 2. Insert message
