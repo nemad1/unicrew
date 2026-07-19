@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient as createAdminClient } from '@supabase/supabase-js';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://localhost:54321';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder_key';
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createAdminClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:3001";
 
 // When a card lands on the "Enrolled" stage, ask the student to rate their
@@ -14,31 +16,33 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:3001";
 async function maybeSendFeedbackPrompt(cardId: string) {
   const { data: card } = await supabase
     .from('kanban_cards')
-    .select('contact_id, assignee_id, kanban_stages(name, is_completed)')
+    .select('contact_id, kanban_stages(name, is_completed)')
     .eq('id', cardId)
     .single();
 
   const stage = card?.kanban_stages as unknown as { name: string; is_completed: boolean } | null;
   const isEnrolled = stage && (stage.is_completed || stage.name?.toLowerCase() === 'enrolled');
-  if (!card || !isEnrolled || !card.contact_id || !card.assignee_id) return;
+  if (!card || !isEnrolled || !card.contact_id) return;
 
   const { data: contact } = await supabase
     .from('contacts')
-    .select('phone_number')
+    .select('phone_number, assigned_to')
     .eq('id', card.contact_id)
     .single();
+
+  if (!contact?.phone_number || !contact.assigned_to) return;
 
   const { data: ambassador } = await supabase
     .from('internal_users')
     .select('whatsapp_session_id')
-    .eq('id', card.assignee_id)
+    .eq('id', contact.assigned_to)
     .single();
 
-  if (!contact?.phone_number || !ambassador?.whatsapp_session_id) return;
+  if (!ambassador?.whatsapp_session_id) return;
 
   await supabase
     .from('contacts')
-    .update({ pending_feedback_for: card.assignee_id })
+    .update({ pending_feedback_for: contact.assigned_to })
     .eq('id', card.contact_id);
 
   try {
@@ -58,10 +62,52 @@ async function maybeSendFeedbackPrompt(cardId: string) {
 
 export async function PUT(request: Request) {
   try {
+    const authedSupabase = await createServerSupabase();
+    const {
+      data: { user },
+    } = await authedSupabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const { data: profile } = await supabase
+      .from('internal_users')
+      .select('role, team_id')
+      .eq('id', user.id)
+      .single();
+    if (!profile) return NextResponse.json({ error: 'User profile not found' }, { status: 404 });
+
     const { card_id, new_stage_id } = await request.json();
 
     if (!card_id || !new_stage_id) {
       return NextResponse.json({ error: 'Missing card_id or new_stage_id' }, { status: 400 });
+    }
+
+    const { data: card } = await supabase
+      .from('kanban_cards')
+      .select('id, contacts ( id, team_id, assigned_to )')
+      .eq('id', card_id)
+      .single();
+
+    const contact = Array.isArray(card?.contacts) ? card.contacts[0] : card?.contacts;
+    if (!card || !contact) return NextResponse.json({ error: 'Card not found' }, { status: 404 });
+
+    if (profile.role === 'ambassador' && contact.assigned_to !== user.id) {
+      return NextResponse.json({ error: 'Forbidden: not your card.' }, { status: 403 });
+    }
+    if (profile.role === 'counselor' && contact.team_id !== profile.team_id) {
+      return NextResponse.json({ error: 'Forbidden: not your team\'s card.' }, { status: 403 });
+    }
+
+    if (profile.role !== 'admin') {
+      const { data: targetStage } = await supabase
+        .from('kanban_stages')
+        .select('kanban_boards ( team_id )')
+        .eq('id', new_stage_id)
+        .single();
+      const board = targetStage?.kanban_boards as any;
+      const targetTeamId = Array.isArray(board) ? board[0]?.team_id : board?.team_id;
+      if (targetTeamId !== contact.team_id) {
+        return NextResponse.json({ error: 'Forbidden: cannot move a card into another team\'s pipeline.' }, { status: 403 });
+      }
     }
 
     const { data, error } = await supabase

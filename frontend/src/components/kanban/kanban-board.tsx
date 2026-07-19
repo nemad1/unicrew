@@ -77,7 +77,7 @@ export type Deal = {
   time: string;
   intent: Intent;
   preview: string;
-  ambassador: { name: string; initials: string };
+  ambassador: { id: string | null; name: string; initials: string };
 };
 
 type Column = {
@@ -99,14 +99,7 @@ const accentColors = [
   { hex: "#db2777", label: "Pink" },
 ];
 
-// Replaced by real data
-
-const ambassadors = [
-  { name: "Hana", initials: "HK" },
-  { name: "Ravi", initials: "RP" },
-  { name: "Mia", initials: "ML" },
-  { name: "Sara", initials: "SO" },
-];
+type BoardAmbassador = { id: string; name: string; initials: string };
 
 const intentOptions: Intent[] = [
   "Fees",
@@ -132,6 +125,7 @@ type CardMenuState = {
 function CardOptionsMenu({
   menu,
   columns,
+  ambassadors,
   onClose,
   onMoveToStage,
   onAssignAmbassador,
@@ -142,9 +136,10 @@ function CardOptionsMenu({
 }: {
   menu: CardMenuState;
   columns: Column[];
+  ambassadors: BoardAmbassador[];
   onClose: () => void;
   onMoveToStage: (dealId: string, targetColId: string) => void;
-  onAssignAmbassador: (dealId: string, name: string) => void;
+  onAssignAmbassador: (dealId: string, ambassadorId: string) => void;
   onViewProfile: (dealId: string) => void;
   onAddNote: (dealId: string) => void;
   onArchive: (dealId: string) => void;
@@ -282,18 +277,22 @@ function CardOptionsMenu({
             placeholder="Search ambassadors..."
             className="w-full text-xs border border-gray-200 rounded-md px-2.5 py-1.5 outline-none focus:border-blue-400"
           />
-          {filteredAmbassadors.map((a) => (
-            <button
-              key={a.name}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
-              onClick={() => { onAssignAmbassador(menu.dealId, a.name); onClose(); }}
-            >
-              <span className="w-5 h-5 rounded-full bg-gray-200 text-gray-700 flex items-center justify-center text-[9px] shrink-0">
-                {a.initials}
-              </span>
-              {a.name}
-            </button>
-          ))}
+          {filteredAmbassadors.length === 0 ? (
+            <p className="px-2.5 py-1.5 text-xs text-gray-400">No ambassadors on this team</p>
+          ) : (
+            filteredAmbassadors.map((a) => (
+              <button
+                key={a.id}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                onClick={() => { onAssignAmbassador(menu.dealId, a.id); onClose(); }}
+              >
+                <span className="w-5 h-5 rounded-full bg-gray-200 text-gray-700 flex items-center justify-center text-[9px] shrink-0">
+                  {a.initials}
+                </span>
+                {a.name}
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>
@@ -802,14 +801,25 @@ export function KanbanBoard({
   const isMobile = useMediaQuery("(max-width: 767px)");
   const [columns, setColumns] = useState<Column[]>([]);
   const [activeFilter, setActiveFilter] = useState("All Intents");
+  const [searchQuery, setSearchQuery] = useState("");
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
   const [activeColumn, setActiveColumn] = useState<Column | null>(null);
+
+  // Team-scoped board state
+  const [ambassadors, setAmbassadors] = useState<BoardAmbassador[]>([]);
+  const [availableTeams, setAvailableTeams] = useState<{ id: string; name: string }[]>([]);
+  const [currentBoard, setCurrentBoard] = useState<{ id: string; name: string; team_id: string | null } | null>(null);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [viewerId, setViewerId] = useState<string | null>(null);
+  const [viewerRole, setViewerRole] = useState<string | null>(null);
 
   // New deal dialog
   const [newDealOpen, setNewDealOpen] = useState(false);
   const [formName, setFormName] = useState("");
+  const [formPhone, setFormPhone] = useState("");
   const [formIntent, setFormIntent] = useState<Intent>("Fees");
-  const [formAmbassador, setFormAmbassador] = useState(ambassadors[0].name);
+  const [formAmbassadorId, setFormAmbassadorId] = useState("");
+  const [creatingDeal, setCreatingDeal] = useState(false);
 
   // Add stage
   const [addingStage, setAddingStage] = useState(false);
@@ -826,51 +836,81 @@ export function KanbanBoard({
 
   // Skeleton loading
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    async function fetchBoard() {
-      try {
-        const res = await fetch('/api/kanban/board');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.columns) {
-            setColumns(data.columns);
-          }
-        }
-      } catch (err) {
-        console.error("Failed to fetch kanban board:", err);
-      } finally {
-        setLoading(false);
+
+  const fetchBoard = useCallback(async (teamId?: string | null) => {
+    try {
+      setLoading(true);
+      const url = teamId ? `/api/kanban/board?teamId=${teamId}` : '/api/kanban/board';
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.columns) setColumns(data.columns);
+        setAmbassadors(data.ambassadors || []);
+        setAvailableTeams(data.availableTeams || []);
+        setCurrentBoard(data.board || null);
+        setSelectedTeamId(data.board?.team_id ?? null);
+        setViewerId(data.viewerId ?? null);
+        setViewerRole(data.viewerRole ?? null);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to load board.");
       }
+    } catch (err) {
+      console.error("Failed to fetch kanban board:", err);
+    } finally {
+      setLoading(false);
     }
-    fetchBoard();
   }, []);
+
+  useEffect(() => {
+    fetchBoard();
+  }, [fetchBoard]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   const resetForm = () => {
     setFormName("");
+    setFormPhone("");
     setFormIntent("Fees");
-    setFormAmbassador(ambassadors[0].name);
+    setFormAmbassadorId("");
   };
 
-  const handleCreateDeal = () => {
-    if (!formName.trim()) return;
-    const ambassador = ambassadors.find((a) => a.name === formAmbassador) ?? ambassadors[0];
-    const newDeal: Deal = {
-      id: `nd-${Date.now()}`,
-      contactId: `c-${Date.now()}`,
-      phone: "0000000000",
-      name: formName.trim(),
-      time: "Just now",
-      intent: formIntent,
-      preview: "New deal created — awaiting first message.",
-      ambassador,
-    };
-    setColumns((prev) =>
-      prev.map((c) => (c.id === "new" ? { ...c, deals: [newDeal, ...c.deals] } : c)),
-    );
-    setNewDealOpen(false);
-    resetForm();
+  const handleCreateDeal = async () => {
+    if (!formName.trim() || !formPhone.trim()) return;
+    if (viewerRole !== "ambassador" && !formAmbassadorId) {
+      toast.error("Please select an ambassador to assign this deal to.");
+      return;
+    }
+
+    setCreatingDeal(true);
+    try {
+      const res = await fetch('/api/kanban/deals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formName.trim(),
+          phone_number: formPhone.trim(),
+          intent: formIntent,
+          assignee_id: viewerRole === "ambassador" ? undefined : formAmbassadorId,
+          teamId: selectedTeamId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to create deal.");
+        return;
+      }
+
+      setColumns((prev) =>
+        prev.map((c) => (c.id === data.stageId ? { ...c, deals: [data.deal, ...c.deals] } : c)),
+      );
+      setNewDealOpen(false);
+      resetForm();
+    } catch (err) {
+      toast.error("Failed to create deal.");
+    } finally {
+      setCreatingDeal(false);
+    }
   };
 
   const handleCreateStage = async (title: string, accent: string) => {
@@ -924,17 +964,44 @@ export function KanbanBoard({
     });
   }, []);
 
-  const handleAssignAmbassador = useCallback((dealId: string, name: string) => {
-    const amb = ambassadors.find((a) => a.name === name) ?? ambassadors[0];
+  const handleAssignAmbassador = useCallback((dealId: string, ambassadorId: string) => {
+    const amb = ambassadors.find((a) => a.id === ambassadorId);
+    if (!amb) return;
+
+    const deal = columns.flatMap((c) => c.deals).find((d) => d.id === dealId);
+    if (!deal) return;
+
+    // Optimistic update, reverted on failure
     setColumns((prev) =>
       prev.map((c) => ({
         ...c,
         deals: c.deals.map((d) =>
-          d.id === dealId ? { ...d, ambassador: { name: amb.name, initials: amb.initials } } : d,
+          d.id === dealId ? { ...d, ambassador: { id: amb.id, name: amb.name, initials: amb.initials } } : d,
         ),
       })),
     );
-  }, []);
+
+    fetch(`/api/contacts/${encodeURIComponent(deal.phone)}/assign`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignee_id: amb.id }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Failed to assign ambassador.');
+        }
+      })
+      .catch((err) => {
+        toast.error(err.message);
+        setColumns((prev) =>
+          prev.map((c) => ({
+            ...c,
+            deals: c.deals.map((d) => (d.id === dealId ? deal : d)),
+          })),
+        );
+      });
+  }, [ambassadors, columns]);
 
   const handleArchive = useCallback((dealId: string) => {
     setColumns((prev) =>
@@ -1075,6 +1142,19 @@ export function KanbanBoard({
   const columnIds = useMemo(() => columns.map((c) => c.id), [columns]);
   const gridCols = columns.length + (addingStage ? 1 : 1); // +1 for Add Stage card/form
 
+  const filteredColumns = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return columns.map((col) => ({
+      ...col,
+      deals: col.deals.filter((deal) => {
+        if (activeFilter === "Assigned to Me" && deal.ambassador.id !== viewerId) return false;
+        if (activeFilter === "Unassigned" && deal.ambassador.id !== null) return false;
+        if (q && !deal.name.toLowerCase().includes(q) && !deal.phone.toLowerCase().includes(q)) return false;
+        return true;
+      }),
+    }));
+  }, [columns, activeFilter, searchQuery, viewerId]);
+
 
 
   return (
@@ -1093,7 +1173,12 @@ export function KanbanBoard({
       <div className={cn("border-b border-gray-200 flex items-center gap-3 shrink-0", isMobile ? "px-4 py-3 flex-wrap bg-white" : "px-6 py-4")}>
         <div className={cn("relative", isMobile ? "w-full" : "w-72")}>
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <Input placeholder="Search deals..." className="pl-9 bg-gray-50 border-gray-200" />
+          <Input
+            placeholder="Search deals..."
+            className="pl-9 bg-gray-50 border-gray-200"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
         </div>
         <div className="flex items-center gap-2">
           {["All Intents", "Assigned to Me", "Unassigned"].map((label) => (
@@ -1105,6 +1190,21 @@ export function KanbanBoard({
             />
           ))}
         </div>
+        {viewerRole === "admin" && availableTeams.length > 0 && (
+          <Select
+            value={selectedTeamId ?? ""}
+            onValueChange={(v) => fetchBoard(v || null)}
+          >
+            <SelectTrigger className="w-48 bg-white border-gray-200">
+              <SelectValue placeholder="Select team board" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableTeams.map((t) => (
+                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <div className="ml-auto">
           <Button
             className="bg-blue-700 hover:bg-blue-800 text-white"
@@ -1156,7 +1256,7 @@ export function KanbanBoard({
               onDragEnd={handleDragEnd}
             >
               <SortableContext items={columnIds} strategy={horizontalListSortingStrategy}>
-                {columns.map((col) => (
+                {filteredColumns.map((col) => (
                   <SortableColumn
                     key={col.id}
                     column={col}
@@ -1207,6 +1307,7 @@ export function KanbanBoard({
         <CardOptionsMenu
           menu={cardMenu}
           columns={columns}
+          ambassadors={ambassadors}
           onClose={() => setCardMenu(null)}
           onMoveToStage={handleMoveDeal}
           onAssignAmbassador={handleAssignAmbassador}
@@ -1326,6 +1427,16 @@ export function KanbanBoard({
               />
             </div>
             <div className="space-y-1.5">
+              <Label htmlFor="deal-phone" className="text-xs text-gray-600">WhatsApp number</Label>
+              <Input
+                id="deal-phone"
+                value={formPhone}
+                onChange={(e) => setFormPhone(e.target.value)}
+                placeholder="e.g. 60123456789"
+                className="bg-white border-gray-200"
+              />
+            </div>
+            <div className="space-y-1.5">
               <Label className="text-xs text-gray-600">Intent category</Label>
               <Select value={formIntent} onValueChange={(v) => setFormIntent(v as Intent)}>
                 <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
@@ -1334,15 +1445,17 @@ export function KanbanBoard({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-gray-600">Assigned ambassador</Label>
-              <Select value={formAmbassador} onValueChange={setFormAmbassador}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {ambassadors.map((a) => <SelectItem key={a.name} value={a.name}>{a.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+            {viewerRole !== "ambassador" && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-gray-600">Assigned ambassador</Label>
+                <Select value={formAmbassadorId} onValueChange={setFormAmbassadorId}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select ambassador" /></SelectTrigger>
+                  <SelectContent>
+                    {ambassadors.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -1354,10 +1467,10 @@ export function KanbanBoard({
             </Button>
             <Button
               className="bg-blue-700 hover:bg-blue-800 text-white"
-              disabled={!formName.trim()}
+              disabled={!formName.trim() || !formPhone.trim() || creatingDeal}
               onClick={handleCreateDeal}
             >
-              Create Deal
+              {creatingDeal ? "Creating..." : "Create Deal"}
             </Button>
           </DialogFooter>
         </DialogContent>
