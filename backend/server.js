@@ -1,19 +1,31 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { createClient } = require('@supabase/supabase-js');
 const { getSessionStatus, fetchAllChats, getChatMessages } = require('./whatsappManager');
 const { runAnalysisForContact } = require('./aiAnalysisRunner');
 const { startDailyAnalysisCron } = require('./cron/dailyAnalysis');
+const { chunkText } = require('./textChunker');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+});
+
 // Initialize Supabase Client using Service Role to bypass RLS
 const supabaseUrl = process.env.SUPABASE_URL || 'http://localhost:54321'; 
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder_key';
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'placeholder_key');
 
 const PORT = process.env.PORT || 3001;
 
@@ -344,6 +356,80 @@ app.put('/api/contacts/:phone_number/label', async (req, res) => {
     } catch (err) {
         console.error("Update label error:", err);
         res.status(500).json({ error: "Internal Error" });
+    }
+});
+
+// ==========================================
+// KNOWLEDGE BASE (RAG) ENDPOINTS
+// ==========================================
+app.post('/api/knowledge-base/upload', upload.single('file'), async (req, res) => {
+    const file = req.file;
+
+    if (!file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    try {
+        let textContent = '';
+
+        if (file.mimetype === 'application/pdf') {
+            const parsed = await pdfParse(file.buffer);
+            textContent = parsed.text;
+        } else if (
+            file.mimetype === 'application/msword' ||
+            file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        ) {
+            const parsed = await mammoth.extractRawText({ buffer: file.buffer });
+            textContent = parsed.value;
+        } else {
+            return res.status(400).json({ error: 'Unsupported file type. Please upload a PDF or Word document.' });
+        }
+
+        if (!textContent || !textContent.trim()) {
+            return res.status(400).json({ error: 'No text could be extracted from this file' });
+        }
+
+        const chunks = chunkText(textContent, 1000);
+        const embeddingModel = genAI.getGenerativeModel({ model: 'gemini-embedding-2' });
+
+        let insertedCount = 0;
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            try {
+                const result = await embeddingModel.embedContent(chunk);
+                const embedding = result.embedding.values;
+
+                const { error } = await supabase.from('knowledge_base').insert({
+                    title: `${file.originalname} (Part ${i + 1})`,
+                    content: chunk,
+                    embedding,
+                    metadata: {
+                        source_file: file.originalname,
+                        mimetype: file.mimetype,
+                        chunk_index: i,
+                        chunk_count: chunks.length,
+                    },
+                });
+
+                if (error) {
+                    console.error(`Error inserting chunk ${i + 1} of ${file.originalname}:`, error);
+                } else {
+                    insertedCount++;
+                }
+            } catch (chunkErr) {
+                console.error(`Error embedding chunk ${i + 1} of ${file.originalname}:`, chunkErr);
+            }
+        }
+
+        res.json({
+            success: true,
+            fileName: file.originalname,
+            totalChunks: chunks.length,
+            insertedChunks: insertedCount,
+        });
+    } catch (err) {
+        console.error('Knowledge base upload error:', err);
+        res.status(500).json({ error: 'Failed to process document', details: err.message });
     }
 });
 

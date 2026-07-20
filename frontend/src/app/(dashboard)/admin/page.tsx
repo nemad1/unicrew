@@ -115,11 +115,12 @@ export default function AdminDashboardPage() {
           })}
         </div>
 
-        <div className="grid grid-cols-3 gap-5">
+        <div className="grid grid-cols-4 gap-5">
           {[
-            { href: "/admin/users",         title: "User Management",  description: "Add, deactivate, or remove counselors and ambassadors." },
-            { href: "/admin/intent-router", title: "AI Intent Router", description: "Review counselor change requests and edit routing rules." },
-            { href: "/admin/settings",      title: "System Settings",  description: "Branding, notifications, privacy, and integrations." },
+            { href: "/admin/users",          title: "User Management",  description: "Add, deactivate, or remove counselors and ambassadors." },
+            { href: "/admin/intent-router",  title: "AI Intent Router", description: "Review counselor change requests and edit routing rules." },
+            { href: "/admin/settings",       title: "System Settings",  description: "Branding, notifications, privacy, and integrations." },
+            { href: "/admin/knowledge-base", title: "Knowledge Base",   description: "Upload and manage PDF and Word documents for AI Assistant replies." },
           ].map((quick) => (
             <Link
               key={quick.href}
