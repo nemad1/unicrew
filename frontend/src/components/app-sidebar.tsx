@@ -50,13 +50,6 @@ const getNavItems = (role: Role) => {
   }
 };
 
-const getBottomNavItems = (role: Role) => {
-  if (role === "counselor") {
-    return [{ name: "Intent Router", href: "/settings/intent-router", icon: GitBranch }];
-  }
-  return [];
-};
-
 // Views where the sidebar auto-collapses to rail mode to maximise chat width.
 const RAIL_PATHS = new Set(["/inbox"]);
 
@@ -88,7 +81,6 @@ export function AppSidebar() {
 
   const role = user?.role ?? "counselor";
   const navItems = getNavItems(role);
-  const bottomNavItems = getBottomNavItems(role);
 
   const displayName = user?.full_name ?? "User";
   const displayInitials = user?.initials ?? "??";
@@ -212,35 +204,6 @@ export function AppSidebar() {
         )}
       >
         {role === "ambassador" && <ShiftClockToggle collapsed={collapsed} />}
-
-        {bottomNavItems.map((item) => {
-          const Icon = item.icon;
-          const active = isActive(item.href);
-          return (
-            <Link
-              key={item.name}
-              href={item.href}
-              title={item.name}
-              className={cn(
-                "rounded-lg text-sm transition-colors flex items-center group relative",
-                collapsed
-                  ? "w-10 h-10 mx-auto justify-center"
-                  : "w-full gap-3 px-3 py-2 mb-2",
-                active
-                  ? (isAdmin ? "bg-blue-700 text-white" : "bg-blue-50 text-blue-700")
-                  : (isAdmin ? "text-slate-300 hover:bg-slate-800 hover:text-white" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"),
-              )}
-            >
-              <Icon className={collapsed ? "w-[18px] h-[18px]" : "w-4 h-4"} />
-              {!collapsed && <span>{item.name}</span>}
-              {collapsed && (
-                <span className="pointer-events-none absolute left-[calc(100%+10px)] top-1/2 -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2.5 py-1 text-xs text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 z-50">
-                  {item.name}
-                </span>
-              )}
-            </Link>
-          );
-        })}
       </div>
 
       <div
