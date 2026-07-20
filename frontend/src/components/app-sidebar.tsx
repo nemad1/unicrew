@@ -28,7 +28,7 @@ const getNavItems = (role: Role) => {
       { name: "Dashboard", href: "/admin", icon: BarChart3 },
       { name: "Inbox", href: "/inbox", icon: Inbox },
       { name: "User Management", href: "/admin/users", icon: Users },
-      { name: "AI Router Admin", href: "/settings/intent-router", icon: GitBranch },
+      { name: "AI Router Admin", href: "/admin/intent-router", icon: GitBranch },
       { name: "Settings", href: "/admin/settings", icon: Settings },
     ];
   } else if (role === "ambassador") {
