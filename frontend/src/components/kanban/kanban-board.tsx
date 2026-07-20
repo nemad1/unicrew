@@ -18,6 +18,7 @@ import {
   Palette,
   Trash2,
   MessageCircle,
+  AlertTriangle,
 } from "lucide-react";
 import {
   DndContext,
@@ -78,6 +79,9 @@ export type Deal = {
   intent: Intent;
   preview: string;
   ambassador: { id: string | null; name: string; initials: string };
+  /** Denormalized cache from contacts.top_concerns (migration 009) — optional since
+   * client-constructed deals (e.g. right after "New Deal") won't have it yet. */
+  topConcerns?: { label: string; confidence?: number; sentiment?: string | null }[];
 };
 
 type Column = {
@@ -388,6 +392,20 @@ function IntentBadge({ intent }: { intent: Intent }) {
   );
 }
 
+function ConcernIndicator({ concerns }: { concerns?: { label: string }[] }) {
+  if (!concerns || concerns.length === 0) return null;
+  const label = concerns.length === 1 ? concerns[0].label : `${concerns[0].label} +${concerns.length - 1}`;
+  return (
+    <span
+      title={concerns.map((c) => c.label).join(", ")}
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs bg-amber-50 text-amber-700 border-amber-200 max-w-[140px]"
+    >
+      <AlertTriangle className="w-3 h-3 shrink-0" />
+      <span className="truncate">{label}</span>
+    </span>
+  );
+}
+
 // ─── Deal Card ────────────────────────────────────────────────────────────────
 
 function DealCardContent({
@@ -432,8 +450,9 @@ function DealCardContent({
           <ChevronRight className="w-3.5 h-3.5 text-gray-300" />
         </span>
       </div>
-      <div>
+      <div className="flex flex-wrap items-center gap-1.5">
         <IntentBadge intent={deal.intent} />
+        <ConcernIndicator concerns={deal.topConcerns} />
       </div>
       <p className="text-xs text-gray-500 italic truncate">{deal.preview}</p>
       <div className="flex items-center justify-between pt-1">

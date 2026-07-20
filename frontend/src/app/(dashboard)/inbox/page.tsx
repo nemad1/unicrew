@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { ChatList } from "@/components/chat/chat-list";
 import { ChatWorkspace } from "@/components/chat/chat-workspace";
@@ -72,7 +72,7 @@ export default function InboxPage() {
       }
     };
     fetchCrmContacts();
-  }, [supabase]);
+  }, []);
 
   // Setup Socket.IO for live messages
   useEffect(() => {
@@ -298,6 +298,11 @@ export default function InboxPage() {
     </div>
   ) : undefined;
 
+  const handleConnected = useCallback((sid?: string) => {
+    if (sid) setSessionId(sid);
+    setWhatsappStatus("CONNECTED");
+  }, []);
+
   return (
     <div className="flex-1 flex h-full overflow-hidden">
       <ChatList
@@ -309,10 +314,7 @@ export default function InboxPage() {
 
       <div className="flex-1 flex flex-col bg-white overflow-hidden">
         {whatsappStatus !== "CONNECTED" ? (
-          <WhatsappQR onConnected={(sid?: string) => {
-            if (sid) setSessionId(sid);
-            setWhatsappStatus("CONNECTED");
-          }} />
+          <WhatsappQR onConnected={handleConnected} />
         ) : showProfile ? (
           <ProspectProfile
             onBack={() => setShowProfile(false)}

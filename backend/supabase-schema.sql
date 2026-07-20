@@ -20,6 +20,7 @@ CREATE TABLE internal_users (
     role user_role NOT NULL DEFAULT 'ambassador',
     team_id UUID REFERENCES teams(id) ON DELETE SET NULL,
     is_team_leader BOOLEAN DEFAULT FALSE,
+    whatsapp_session_id TEXT UNIQUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

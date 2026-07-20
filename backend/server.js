@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const { getSessionStatus, fetchAllChats, getChatMessages } = require('./whatsappManager');
-const { analyzeContactProfile } = require('./aiService');
+const { runAnalysisForContact } = require('./aiAnalysisRunner');
 const { startDailyAnalysisCron } = require('./cron/dailyAnalysis');
 
 const app = express();
@@ -16,65 +16,6 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 const PORT = process.env.PORT || 3001;
-
-// ==========================================
-// AI HELPER
-// ==========================================
-
-async function applyAiAnalysis(contact, aiData) {
-    if (!aiData) return null;
-
-    let updatedFields = contact.fields || [
-        { label: "Current High School", value: "" },
-        { label: "Target Course", value: "" },
-        { label: "Intended Intake", value: "" },
-        { label: "Assigned Ambassador", value: "" },
-        { label: "Assigned Counselor", value: "" },
-        { label: "Source Channel", value: "WhatsApp" }
-    ];
-
-    if (aiData.fields) {
-        for (const [key, value] of Object.entries(aiData.fields)) {
-            if (value) {
-                const fieldIndex = updatedFields.findIndex(f => f.label === key);
-                if (fieldIndex >= 0) {
-                    updatedFields[fieldIndex].value = value;
-                } else {
-                    updatedFields.push({ label: key, value });
-                }
-            }
-        }
-    }
-
-    await supabase
-        .from('contacts')
-        .update({
-            ai_summary: aiData.summary,
-            ai_tags: aiData.tags || [],
-            enrollment_probability: aiData.probability || 0,
-            intent: aiData.intent || 'General',
-            fields: updatedFields
-        })
-        .eq('id', contact.id);
-
-    if (aiData.timeline_update) {
-        await supabase.from('interaction_logs').insert({
-            contact_id: contact.id,
-            sender_type: 'system',
-            content: aiData.timeline_update,
-            is_read: true,
-            is_automated: true
-        });
-    }
-
-    return {
-        ai_summary: aiData.summary,
-        ai_tags: aiData.tags || [],
-        enrollment_probability: aiData.probability || 0,
-        intent: aiData.intent || 'General',
-        fields: updatedFields
-    };
-}
 
 // ==========================================
 // WHATSAPP SESSION ENDPOINTS
@@ -177,7 +118,7 @@ app.post('/api/whatsapp/sync', async (req, res) => {
             let contact;
             const { data: existingContact, error: contactError } = await supabase
                 .from('contacts')
-                .select('id, ai_summary, fields')
+                .select('id, ai_summary, intent, fields, top_interests, top_concerns, last_analyzed_message_id, last_analyzed_message_at')
                 .eq('phone_number', phoneNumber)
                 .single();
             
@@ -227,20 +168,10 @@ app.post('/api/whatsapp/sync', async (req, res) => {
 
             // Generate AI summary if missing
             if (!contact.ai_summary) {
-                const { data: recentLogs } = await supabase
-                    .from('interaction_logs')
-                    .select('sender_type, content')
-                    .eq('contact_id', contact.id)
-                    .order('created_at', { ascending: true })
-                    .limit(10);
-                
-                if (recentLogs && recentLogs.length >= 2) {
-                    console.log(`[Sync AI] Generating background summary for ${phoneNumber}...`);
-                    const aiData = await analyzeContactProfile(contact.id, recentLogs);
-                    if (aiData) {
-                        await applyAiAnalysis(contact, aiData);
-                        console.log(`[Sync AI] Updated profile for ${phoneNumber}`);
-                    }
+                console.log(`[Sync AI] Generating background summary for ${phoneNumber}...`);
+                const result = await runAnalysisForContact(contact);
+                if (result.status === 'ok') {
+                    console.log(`[Sync AI] Updated profile for ${phoneNumber}`);
                 }
             }
         }
@@ -285,7 +216,7 @@ app.post('/webhook', async (req, res) => {
             // 1. Check if contact exists in the CRM
             const { data: contact, error: contactError } = await supabase
                 .from('contacts')
-                .select('id, ai_summary, fields, pending_feedback_for')
+                .select('id, ai_summary, intent, fields, top_interests, top_concerns, last_analyzed_message_id, last_analyzed_message_at, pending_feedback_for')
                 .eq('phone_number', from)
                 .single();
 
@@ -333,19 +264,9 @@ app.post('/webhook', async (req, res) => {
                         .eq('contact_id', contact.id);
 
                     if (count === 3 || count === 5 || (!contact.ai_summary && count > 2)) {
-                        const { data: recentLogs } = await supabase
-                            .from('interaction_logs')
-                            .select('sender_type, content')
-                            .eq('contact_id', contact.id)
-                            .order('created_at', { ascending: true })
-                            .limit(15);
-                        
-                        if (recentLogs) {
-                            const aiData = await analyzeContactProfile(contact.id, recentLogs);
-                            if (aiData) {
-                                await applyAiAnalysis(contact, aiData);
-                                console.log(`[Webhook AI] Updated profile for ${from}`);
-                            }
+                        const result = await runAnalysisForContact(contact);
+                        if (result.status === 'ok') {
+                            console.log(`[Webhook AI] Updated profile for ${from}`);
                         }
                     }
                 } catch (aiErr) {
@@ -376,7 +297,7 @@ app.post('/api/ai/analyze/:phone_number', async (req, res) => {
     try {
         const { data: contact, error: contactError } = await supabase
             .from('contacts')
-            .select('id, ai_summary, fields')
+            .select('id, ai_summary, intent, fields, top_interests, top_concerns, last_analyzed_message_id, last_analyzed_message_at')
             .eq('phone_number', phone_number)
             .single();
 
@@ -384,24 +305,14 @@ app.post('/api/ai/analyze/:phone_number', async (req, res) => {
             return res.status(404).json({ error: 'Contact not found' });
         }
 
-        const { data: recentLogs } = await supabase
-            .from('interaction_logs')
-            .select('sender_type, content')
-            .eq('contact_id', contact.id)
-            .order('created_at', { ascending: true })
-            .limit(15);
-
-        if (!recentLogs || recentLogs.length === 0) {
-             return res.status(400).json({ error: 'No interactions found for analysis' });
-        }
-        
         console.log(`[Manual AI Analysis] Starting analysis for ${phone_number}...`);
-        const aiData = await analyzeContactProfile(contact.id, recentLogs);
-        
-        if (aiData) {
-            const updatedProfile = await applyAiAnalysis(contact, aiData);
+        const result = await runAnalysisForContact(contact);
+
+        if (result.status === 'ok') {
             console.log(`[Manual AI Analysis] Completed and updated profile for ${phone_number}`);
-            return res.json({ success: true, profile: updatedProfile });
+            return res.json({ success: true, profile: result.profile });
+        } else if (result.status === 'no_new_messages') {
+            return res.status(400).json({ error: 'No new messages to analyze since the last run' });
         } else {
             return res.status(500).json({ error: 'Failed to analyze profile' });
         }

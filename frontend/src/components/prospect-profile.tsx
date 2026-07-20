@@ -11,6 +11,10 @@ import {
   UserCheck,
   MessageCircle,
   Check,
+  AlertTriangle,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +45,9 @@ export type ProspectTimelineEvent = {
   time: string;
 };
 
+export type ProspectInterest = { label: string; confidence?: number };
+export type ProspectConcern = { label: string; confidence?: number; sentiment?: string | null };
+
 export type ProspectData = {
   /** Two-letter initials shown in the avatar circle */
   initials: string;
@@ -52,11 +59,30 @@ export type ProspectData = {
   leadStatus: string;
   enrollmentProbability: number;
   aiSummary: string;
-  aiTags: { label: string; cls: string }[];
+  topInterests: ProspectInterest[];
   fields: { label: string; value: string }[];
   notes: ProspectNote[];
   timeline: ProspectTimelineEvent[];
 };
+
+/** Legacy contacts.ai_tags is a bare string[]; top_interests is the new
+ * structured cache. Prefer top_interests, fall back to ai_tags for
+ * contacts analyzed before migration 009 ever ran. */
+function deriveInterests(contact: { top_interests?: unknown; ai_tags?: unknown }): ProspectInterest[] {
+  if (Array.isArray(contact.top_interests) && contact.top_interests.length > 0) {
+    return contact.top_interests as ProspectInterest[];
+  }
+  if (Array.isArray(contact.ai_tags)) {
+    return contact.ai_tags.map((t: any) => (typeof t === "string" ? { label: t } : t));
+  }
+  return [];
+}
+
+function SentimentIcon({ sentiment, className }: { sentiment?: string | null; className?: string }) {
+  if (sentiment === "positive") return <TrendingUp className={className} />;
+  if (sentiment === "negative") return <TrendingDown className={className} />;
+  return <Minus className={className} />;
+}
 
 
 
@@ -170,7 +196,23 @@ export function ProspectProfile({
   const [stages, setStages] = useState<{ id: string; name: string }[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState("");
+  const [concerns, setConcerns] = useState<ProspectConcern[]>([]);
+  const [concernsLoading, setConcernsLoading] = useState(true);
   const supabase = createClient();
+
+  const fetchConcerns = async () => {
+    if (!rawPhone) return;
+    setConcernsLoading(true);
+    try {
+      const res = await fetch(`/api/contacts/${rawPhone}/signals?type=concern&limit=5`);
+      const data = await res.json();
+      setConcerns(Array.isArray(data.concerns) ? data.concerns : []);
+    } catch (err) {
+      console.error("Error fetching concerns:", err);
+    } finally {
+      setConcernsLoading(false);
+    }
+  };
 
   const handleAnalyze = async () => {
     if (!rawPhone) return;
@@ -186,17 +228,24 @@ export function ProspectProfile({
         setProspect({
           ...prospect,
           aiSummary: data.profile.ai_summary,
-          aiTags: Array.isArray(data.profile.ai_tags) ? data.profile.ai_tags.map((t: any) => typeof t === 'string' ? { label: t, cls: 'bg-blue-50 text-blue-700 border-blue-200' } : t) : [],
+          topInterests: deriveInterests(data.profile),
           enrollmentProbability: data.profile.enrollment_probability,
           fields: data.profile.fields
         });
       }
+      // A fresh analysis run may have added new concern signals — re-fetch.
+      fetchConcerns();
     } catch (err: any) {
       setAnalyzeError(err.message || "Failed to trigger analysis.");
     } finally {
       setIsAnalyzing(false);
     }
   };
+
+  useEffect(() => {
+    fetchConcerns();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawPhone]);
 
   useEffect(() => {
     fetch('/api/kanban/stages')
@@ -229,7 +278,7 @@ export function ProspectProfile({
              leadStatus: "new",
              enrollmentProbability: 0,
              aiSummary: "Pending AI Analysis...",
-             aiTags: [],
+             topInterests: [],
              fields: [
                { label: "Current High School", value: "" },
                { label: "Target Course", value: "" },
@@ -253,7 +302,7 @@ export function ProspectProfile({
              leadStatus: contact.lead_status || "new",
              enrollmentProbability: contact.enrollment_probability || 0,
              aiSummary: contact.ai_summary || "Pending AI Analysis...",
-             aiTags: Array.isArray(contact.ai_tags) ? contact.ai_tags.map((t: any) => typeof t === 'string' ? { label: t, cls: 'bg-blue-50 text-blue-700 border-blue-200' } : t) : [],
+             topInterests: deriveInterests(contact),
              fields: Array.isArray(contact.fields) && contact.fields.length > 0 ? contact.fields : [
                { label: "Current High School", value: "" },
                { label: "Target Course", value: "" },
@@ -489,20 +538,53 @@ export function ProspectProfile({
               <div className="bg-blue-50/60 border border-blue-100 rounded-md p-4 text-sm text-gray-800 leading-relaxed">
                 {prospect.aiSummary}
               </div>
-              {prospect.aiTags.length > 0 && (
+              {prospect.topInterests.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
-                  {prospect.aiTags.map((t) => (
+                  {prospect.topInterests.map((t) => (
                     <span
                       key={t.label}
-                      className={cn(
-                        "inline-flex items-center px-2 py-0.5 rounded-full border text-xs",
-                        t.cls,
-                      )}
+                      className="inline-flex items-center px-2 py-0.5 rounded-full border text-xs bg-blue-50 text-blue-700 border-blue-200"
                     >
-                      Key Driver · {t.label}
+                      Interest · {t.label}
                     </span>
                   ))}
                 </div>
+              )}
+            </section>
+
+            {/* Concerns */}
+            <section className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <h2 className="text-sm text-gray-900 font-medium">Concerns</h2>
+              </div>
+              <p className="text-xs text-gray-500 mt-0.5 mb-3">
+                Objections and hesitations raised in conversation.
+              </p>
+              {concernsLoading ? (
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-400"></div>
+                  Loading concerns...
+                </div>
+              ) : concerns.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {concerns.map((c) => (
+                    <span
+                      key={c.label}
+                      className={cn(
+                        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs",
+                        c.sentiment === "negative"
+                          ? "bg-red-50 text-red-700 border-red-200"
+                          : "bg-amber-50 text-amber-700 border-amber-200",
+                      )}
+                    >
+                      <SentimentIcon sentiment={c.sentiment} className="w-3 h-3" />
+                      {c.label}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400">No concerns identified yet.</p>
               )}
             </section>
 

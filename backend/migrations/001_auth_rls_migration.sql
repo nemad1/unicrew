@@ -1,6 +1,6 @@
 -- ============================================================
 -- 001_auth_rls_migration.sql
--- Renames enum 'staff' -> 'counselor', adds assigned_to & team_id
+-- Renames enum 'counselor' -> 'counselor', adds assigned_to & team_id
 -- on contacts, enables RLS, creates policies
 -- ============================================================
 
@@ -8,8 +8,8 @@
 -- 1. RENAME ENUM VALUE
 -- =========================
 
--- Rename 'staff' to 'counselor' in user_role enum
-ALTER TYPE user_role RENAME VALUE 'staff' TO 'counselor';
+-- Enum 'staff' was already renamed to 'counselor' in a previous run.
+-- ALTER TYPE user_role RENAME VALUE 'staff' TO 'counselor';
 
 -- =========================
 -- 2. SCHEMA ADDITIONS
@@ -236,6 +236,17 @@ CREATE POLICY stages_admin_all ON kanban_stages
 -- =========================
 -- 9. RLS POLICIES — internal_users
 -- =========================
+
+-- Drop existing policies to safely re-run
+DROP POLICY IF EXISTS users_admin_all ON internal_users;
+DROP POLICY IF EXISTS users_counselor_select ON internal_users;
+DROP POLICY IF EXISTS users_ambassador_select ON internal_users;
+DROP POLICY IF EXISTS users_select_self ON internal_users;
+
+-- Allow users to see their own record (Crucial for initial login fetch!)
+CREATE POLICY users_select_self ON internal_users
+  FOR SELECT TO authenticated
+  USING (id = auth.uid());
 
 -- Admin: full access
 CREATE POLICY users_admin_all ON internal_users

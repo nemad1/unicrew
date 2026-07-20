@@ -126,6 +126,7 @@ export async function GET(request: Request) {
           phone_number,
           intent,
           ai_summary,
+          top_concerns,
           channel,
           assigned_to,
           internal_users:assigned_to ( id, full_name )
@@ -157,6 +158,7 @@ export async function GET(request: Request) {
           time: 'Just now',
           intent: contact.intent || 'General',
           preview: contact.ai_summary || 'No recent messages.',
+          topConcerns: Array.isArray(contact.top_concerns) ? contact.top_concerns : [],
           ambassador: assignee
             ? { id: assignee.id, name: assignee.full_name, initials: getInitials(assignee.full_name) }
             : { id: null, name: 'Unassigned', initials: 'UN' },
