@@ -74,7 +74,7 @@ function TopConcernsWidget() {
 }
 
 export default function AdminDashboardPage() {
-  const suggestions = useAdminStore();
+  const { suggestions } = useAdminStore();
   const pending = suggestions.filter((s) => s.status === "pending").length;
 
   const stats: StatCard[] = [

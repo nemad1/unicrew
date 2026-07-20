@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle, Sparkles } from "lucide-react";
+import { CheckCircle, Loader2, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,23 +24,31 @@ const ruleOptions = [
   "General / Unknown",
 ];
 
-export function SuggestRuleChange({ submittedBy = "Amelia Park" }: { submittedBy?: string }) {
+export function SuggestRuleChange({ onSubmitted }: { onSubmitted?: () => void }) {
   const [rule, setRule] = useState<string>("");
   const [proposedChange, setProposedChange] = useState("");
   const [reason, setReason] = useState("");
   const [success, setSuccess] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const canSubmit = rule && proposedChange.trim() && reason.trim();
+  const canSubmit = rule && proposedChange.trim() && reason.trim() && !submitting;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!canSubmit) return;
-    addSuggestion({
-      submittedBy,
-      rule,
-      proposedChange: proposedChange.trim(),
-      reason: reason.trim(),
-    });
-    setSuccess(true);
+    setSubmitting(true);
+    try {
+      await addSuggestion({
+        rule,
+        proposedChange: proposedChange.trim(),
+        reason: reason.trim(),
+      });
+      setSuccess(true);
+      onSubmitted?.();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to submit suggestion");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleReset = () => {
@@ -120,7 +129,14 @@ export function SuggestRuleChange({ submittedBy = "Amelia Park" }: { submittedBy
         disabled={!canSubmit}
         className="w-full bg-blue-700 hover:bg-blue-800 text-white"
       >
-        Submit Suggestion to Admin
+        {submitting ? (
+          <>
+            <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+            Submitting...
+          </>
+        ) : (
+          "Submit Suggestion to Admin"
+        )}
       </Button>
     </section>
   );

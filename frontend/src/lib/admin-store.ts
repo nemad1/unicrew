@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export type SuggestionStatus = "pending" | "approved" | "rejected";
 
@@ -12,59 +12,88 @@ export type PolicySuggestion = {
   reason: string;
   submittedAt: number; // epoch ms
   status: SuggestionStatus;
+  reviewNote: string | null;
 };
 
-type Listener = () => void;
-const listeners = new Set<Listener>();
+type RawSuggestion = {
+  id: string;
+  rule: string;
+  proposed_change: string;
+  reason: string;
+  status: SuggestionStatus;
+  review_note: string | null;
+  created_at: string;
+  submitted_by_user: { full_name: string } | null;
+};
 
-let suggestions: PolicySuggestion[] = [
-  {
-    id: "seed-1",
-    submittedBy: "Amelia Park",
-    rule: "Fees & Tuition",
-    proposedChange:
-      "Route keywords 'late payment' directly to human supervisor (currently mapped to AI Draft).",
-    reason: "Students using these keywords are usually in distress and need a human touch.",
-    submittedAt: Date.now() - 1000 * 60 * 60 * 2, // 2h ago
-    status: "pending",
-  },
-];
-
-function notify() {
-  listeners.forEach((l) => l());
+function mapSuggestion(raw: RawSuggestion): PolicySuggestion {
+  return {
+    id: raw.id,
+    submittedBy: raw.submitted_by_user?.full_name ?? "Unknown",
+    rule: raw.rule,
+    proposedChange: raw.proposed_change,
+    reason: raw.reason,
+    submittedAt: new Date(raw.created_at).getTime(),
+    status: raw.status,
+    reviewNote: raw.review_note,
+  };
 }
 
-export function addSuggestion(input: Omit<PolicySuggestion, "id" | "submittedAt" | "status">) {
-  suggestions = [
-    {
-      ...input,
-      id: `s-${Date.now()}`,
-      submittedAt: Date.now(),
-      status: "pending",
-    },
-    ...suggestions,
-  ];
-  notify();
-}
-
-export function updateSuggestionStatus(id: string, status: SuggestionStatus) {
-  suggestions = suggestions.map((s) => (s.id === id ? { ...s, status } : s));
-  notify();
-}
-
-export function getSuggestions(): PolicySuggestion[] {
-  return suggestions;
-}
-
-// React hook — re-renders subscribers when the store changes.
+// Fetches policy suggestions from the backend (admins see all, everyone
+// else sees only their own — enforced server-side in the API route).
 export function useAdminStore() {
-  const [snapshot, setSnapshot] = useState(suggestions);
-  useEffect(() => {
-    const listener = () => setSnapshot([...suggestions]);
-    listeners.add(listener);
-    return () => { listeners.delete(listener); };
+  const [suggestions, setSuggestions] = useState<PolicySuggestion[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/policy-suggestions");
+      if (res.ok) {
+        const data = await res.json();
+        setSuggestions((data.suggestions ?? []).map(mapSuggestion));
+      }
+    } finally {
+      setLoading(false);
+    }
   }, []);
-  return snapshot;
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { suggestions, loading, refresh };
+}
+
+export async function addSuggestion(input: {
+  rule: string;
+  proposedChange: string;
+  reason: string;
+}) {
+  const res = await fetch("/api/policy-suggestions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to submit suggestion");
+  }
+}
+
+export async function updateSuggestionStatus(
+  id: string,
+  status: "approved" | "rejected",
+  reviewNote?: string
+) {
+  const res = await fetch(`/api/policy-suggestions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, reviewNote }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to update suggestion");
+  }
 }
 
 export function formatRelativeTime(epochMs: number): string {

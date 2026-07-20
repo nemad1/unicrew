@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Pencil,
@@ -24,6 +24,7 @@ import {
   formatRelativeTime,
   type PolicySuggestion,
 } from "@/lib/admin-store";
+import { RuleModal, type RoutingRule, type Handler } from "@/components/admin/rule-modal";
 import { intentStyles, type Intent } from "@/types/roles";
 
 type UploadStatus = "idle" | "uploading" | "success" | "error";
@@ -163,25 +164,6 @@ function KnowledgeBaseSection() {
   );
 }
 
-type Handler = "AI Bot" | "Human Ambassador";
-
-type Rule = {
-  id: string;
-  keyword: string;
-  intent: Intent;
-  handler: Handler;
-  active: boolean;
-};
-
-const initialRules: Rule[] = [
-  { id: "r1", keyword: "fees",           intent: "Fees",                handler: "AI Bot",           active: true  },
-  { id: "r2", keyword: "scholarships",   intent: "Fees",                handler: "AI Bot",           active: true  },
-  { id: "r3", keyword: "visa",           intent: "Visa & Immigration",  handler: "Human Ambassador", active: true  },
-  { id: "r4", keyword: "hostel",         intent: "Housing",             handler: "Human Ambassador", active: true  },
-  { id: "r5", keyword: "modules",        intent: "Courses",             handler: "AI Bot",           active: false },
-  { id: "r6", keyword: "campus tour",    intent: "Campus Life",         handler: "Human Ambassador", active: true  },
-];
-
 function HandlerBadge({ handler }: { handler: Handler }) {
   const isAI = handler === "AI Bot";
   return (
@@ -206,8 +188,22 @@ function IntentBadge({ intent }: { intent: Intent }) {
   );
 }
 
-function SuggestionCard({ s }: { s: PolicySuggestion }) {
+function SuggestionCard({ s, onChanged }: { s: PolicySuggestion; onChanged: () => void }) {
   const [reviewNote, setReviewNote] = useState<string | null>(null);
+  const [submittingStatus, setSubmittingStatus] = useState<"approved" | "rejected" | null>(null);
+
+  const handleDecision = async (status: "approved" | "rejected") => {
+    setSubmittingStatus(status);
+    try {
+      await updateSuggestionStatus(s.id, status, reviewNote ?? undefined);
+      toast.success(status === "approved" ? "Suggestion approved" : "Suggestion rejected");
+      onChanged();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update suggestion");
+    } finally {
+      setSubmittingStatus(null);
+    }
+  };
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-3 shadow-sm">
@@ -249,7 +245,16 @@ function SuggestionCard({ s }: { s: PolicySuggestion }) {
         </p>
       </div>
 
-      {reviewNote !== null && (
+      {s.status !== "pending" && s.reviewNote && (
+        <div className="bg-blue-50/60 border border-blue-100 rounded-md p-3">
+          <p className="text-xs text-blue-900">
+            <span className="font-semibold">Review note: </span>
+            {s.reviewNote}
+          </p>
+        </div>
+      )}
+
+      {s.status === "pending" && reviewNote !== null && (
         <textarea
           value={reviewNote}
           onChange={(e) => setReviewNote(e.target.value)}
@@ -262,22 +267,33 @@ function SuggestionCard({ s }: { s: PolicySuggestion }) {
       {s.status === "pending" && (
         <div className="flex items-center gap-2">
           <button
-            onClick={() => updateSuggestionStatus(s.id, "approved")}
-            className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md transition-colors"
+            onClick={() => handleDecision("approved")}
+            disabled={submittingStatus !== null}
+            className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md transition-colors disabled:opacity-60"
           >
-            <Check className="w-3 h-3" />
+            {submittingStatus === "approved" ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <Check className="w-3 h-3" />
+            )}
             Approve Request
           </button>
           <button
-            onClick={() => updateSuggestionStatus(s.id, "rejected")}
-            className="inline-flex items-center gap-1.5 border border-red-300 text-red-600 hover:bg-red-50 text-xs font-semibold px-3 py-1.5 rounded-md transition-colors"
+            onClick={() => handleDecision("rejected")}
+            disabled={submittingStatus !== null}
+            className="inline-flex items-center gap-1.5 border border-red-300 text-red-600 hover:bg-red-50 text-xs font-semibold px-3 py-1.5 rounded-md transition-colors disabled:opacity-60"
           >
-            <X className="w-3 h-3" />
+            {submittingStatus === "rejected" ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <X className="w-3 h-3" />
+            )}
             Reject Request
           </button>
           <button
             onClick={() => setReviewNote((n) => (n === null ? "" : null))}
-            className="text-xs text-blue-700 hover:underline ml-auto"
+            disabled={submittingStatus !== null}
+            className="text-xs text-blue-700 hover:underline ml-auto disabled:opacity-60"
           >
             {reviewNote === null ? "Add Review Note" : "Hide Review Note"}
           </button>
@@ -288,11 +304,65 @@ function SuggestionCard({ s }: { s: PolicySuggestion }) {
 }
 
 export default function AIIntentRouterAdminPage() {
-  const [rules, setRules] = useState<Rule[]>(initialRules);
-  const suggestions = useAdminStore();
+  const [rules, setRules] = useState<RoutingRule[]>([]);
+  const [rulesLoading, setRulesLoading] = useState(true);
+  const [ruleModalOpen, setRuleModalOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState<RoutingRule | null>(null);
+  const { suggestions, refresh: refreshSuggestions } = useAdminStore();
 
-  const toggleRule = (id: string) =>
-    setRules((prev) => prev.map((r) => (r.id === id ? { ...r, active: !r.active } : r)));
+  const fetchRules = useCallback(async () => {
+    try {
+      const res = await fetch("/api/routing-rules");
+      if (res.ok) {
+        const data = await res.json();
+        setRules(data.rules ?? []);
+      }
+    } finally {
+      setRulesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRules();
+  }, [fetchRules]);
+
+  const toggleRule = async (rule: RoutingRule) => {
+    const nextActive = !rule.active;
+    setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, active: nextActive } : r)));
+    try {
+      const res = await fetch(`/api/routing-rules/${rule.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: nextActive }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, active: rule.active } : r)));
+      toast.error("Failed to update rule status");
+    }
+  };
+
+  const deleteRule = async (rule: RoutingRule) => {
+    if (!confirm(`Delete the "${rule.keyword}" routing rule?`)) return;
+    try {
+      const res = await fetch(`/api/routing-rules/${rule.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      setRules((prev) => prev.filter((r) => r.id !== rule.id));
+      toast.success("Routing rule deleted");
+    } catch {
+      toast.error("Failed to delete rule");
+    }
+  };
+
+  const openCreateModal = () => {
+    setEditingRule(null);
+    setRuleModalOpen(true);
+  };
+
+  const openEditModal = (rule: RoutingRule) => {
+    setEditingRule(rule);
+    setRuleModalOpen(true);
+  };
 
   const pending = suggestions.filter((s) => s.status === "pending");
   const resolved = suggestions.filter((s) => s.status !== "pending");
@@ -306,10 +376,17 @@ export default function AIIntentRouterAdminPage() {
             Manage keyword triggers, review counselor policy change requests, and maintain the AI knowledge base.
           </p>
         </div>
-        <Button className="bg-blue-700 hover:bg-blue-800 text-white" size="sm">
+        <Button className="bg-blue-700 hover:bg-blue-800 text-white" size="sm" onClick={openCreateModal}>
           + Add Rule
         </Button>
       </div>
+
+      <RuleModal
+        open={ruleModalOpen}
+        onClose={() => setRuleModalOpen(false)}
+        onSaved={fetchRules}
+        rule={editingRule}
+      />
 
       <div className="p-6 space-y-6">
         <KnowledgeBaseSection />
@@ -339,20 +416,43 @@ export default function AIIntentRouterAdminPage() {
                     <td className="px-5 py-3"><IntentBadge intent={rule.intent} /></td>
                     <td className="px-5 py-3"><HandlerBadge handler={rule.handler} /></td>
                     <td className="px-5 py-3">
-                      <Switch checked={rule.active} onCheckedChange={() => toggleRule(rule.id)} />
+                      <Switch checked={rule.active} onCheckedChange={() => toggleRule(rule)} />
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-1 justify-end">
-                        <button className="p-1.5 rounded text-gray-500 hover:text-gray-900 hover:bg-gray-100" title="Edit">
+                        <button
+                          onClick={() => openEditModal(rule)}
+                          className="p-1.5 rounded text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+                          title="Edit"
+                        >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        <button className="p-1.5 rounded text-gray-500 hover:text-red-600 hover:bg-red-50" title="Delete">
+                        <button
+                          onClick={() => deleteRule(rule)}
+                          className="p-1.5 rounded text-gray-500 hover:text-red-600 hover:bg-red-50"
+                          title="Delete"
+                        >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>
                   </tr>
                 ))}
+                {!rulesLoading && rules.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-8 text-center text-sm text-gray-400">
+                      No routing rules yet. Click &ldquo;+ Add Rule&rdquo; to create one.
+                    </td>
+                  </tr>
+                )}
+                {rulesLoading && (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-8 text-center text-sm text-gray-400">
+                      <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+                      Loading rules...
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -379,11 +479,11 @@ export default function AIIntentRouterAdminPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {pending.map((s) => <SuggestionCard key={s.id} s={s} />)}
+              {pending.map((s) => <SuggestionCard key={s.id} s={s} onChanged={refreshSuggestions} />)}
               {resolved.length > 0 && (
                 <>
                   <p className="text-xs text-gray-400 uppercase tracking-wider pt-2">Recently resolved</p>
-                  {resolved.map((s) => <SuggestionCard key={s.id} s={s} />)}
+                  {resolved.map((s) => <SuggestionCard key={s.id} s={s} onChanged={refreshSuggestions} />)}
                 </>
               )}
             </div>

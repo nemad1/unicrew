@@ -15,6 +15,7 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Calendar } from "@/components/ui/calendar";
@@ -46,6 +47,7 @@ const getNavItems = (role: Role) => {
       { name: "Peer Directory", href: "/peers", icon: Users },
       { name: "Calendar", href: "/calendar", icon: CalendarDays },
       { name: "Analytics", href: "/analytics", icon: BarChart3 },
+      { name: "Suggest a Rule", href: "/suggestions", icon: Sparkles },
     ];
   }
 };
