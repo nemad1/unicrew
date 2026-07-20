@@ -42,6 +42,7 @@ export default function InboxPage() {
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeMessages, setActiveMessages] = useState<any[]>([]);
   const [crmContacts, setCrmContacts] = useState<Record<string, string>>({});
+  const [teamChatCount, setTeamChatCount] = useState<number>(0);
 
   const crmContactsRef = useRef<Record<string, string>>({});
 
@@ -73,6 +74,29 @@ export default function InboxPage() {
     };
     fetchCrmContacts();
   }, []);
+
+  // Fetch the team overview chat count for the header badge (counselors/admins only).
+  // SupervisorInbox keeps this in sync afterwards via onChatsCountChange.
+  useEffect(() => {
+    if (role !== "counselor" && role !== "admin") return;
+    let cancelled = false;
+
+    const fetchTeamCount = async () => {
+      try {
+        const res = await fetch("/api/inbox?mode=team");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data)) setTeamChatCount(data.length);
+      } catch (err) {
+        console.error("Error fetching team chat count:", err);
+      }
+    };
+
+    fetchTeamCount();
+    return () => {
+      cancelled = true;
+    };
+  }, [role]);
 
   // Setup Socket.IO for live messages
   useEffect(() => {
@@ -274,6 +298,7 @@ export default function InboxPage() {
           <SupervisorInbox
             onSwitchToPersonal={() => setInboxMode("personal")}
             onViewProfile={() => setShowProfile(true)}
+            onChatsCountChange={setTeamChatCount}
           />
         )}
       </div>
@@ -292,7 +317,7 @@ export default function InboxPage() {
           onClick={() => setInboxMode("team")}
           className="text-xs py-1.5 rounded text-gray-600 hover:text-gray-900 transition-colors"
         >
-          Team Overview (12)
+          Team Overview ({teamChatCount})
         </button>
       </div>
     </div>

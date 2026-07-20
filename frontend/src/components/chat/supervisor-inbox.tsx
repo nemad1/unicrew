@@ -173,9 +173,11 @@ function MessageBubble({ msg, ambassadorName }: { msg: InteractionLog; ambassado
 export function SupervisorInbox({
   onSwitchToPersonal,
   onViewProfile,
+  onChatsCountChange,
 }: {
   onSwitchToPersonal?: () => void;
   onViewProfile?: () => void;
+  onChatsCountChange?: (count: number) => void;
 }) {
   const [chats, setChats] = useState<SupervisedConversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -192,43 +194,48 @@ export function SupervisorInbox({
   const scrollRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
 
-  // 1. Fetch conversations
-  const fetchChats = useCallback(async () => {
+  // 1. Fetch conversations (and re-poll periodically so the overview stays
+  // in sync as new messages land across ambassadors' sessions)
+  const fetchChats = useCallback(async (opts?: { silent?: boolean }) => {
     try {
-      setLoadingChats(true);
+      if (!opts?.silent) setLoadingChats(true);
       const res = await fetch("/api/inbox?mode=team");
       if (!res.ok) throw new Error("Failed to fetch supervised chats");
-      
+
       const data: SupervisedConversation[] = await res.json();
       setChats(data);
-      if (data.length > 0 && !activeId) {
-        setActiveId(data[0].id);
-      }
+      onChatsCountChange?.(data.length);
+      setActiveId((prev) => prev || (data.length > 0 ? data[0].id : prev));
     } catch (err: any) {
       setError(err.message || "An error occurred");
     } finally {
-      setLoadingChats(false);
+      if (!opts?.silent) setLoadingChats(false);
     }
-  }, [activeId]);
+  }, [onChatsCountChange]);
 
   useEffect(() => {
     fetchChats();
+    const interval = setInterval(() => fetchChats({ silent: true }), 15000);
+    return () => clearInterval(interval);
   }, [fetchChats]);
 
-  // 2. Fetch messages for active chat
+  // 2. Fetch messages for active chat — keyed on the active contact and its
+  // last message timestamp, so a background chat-list poll doesn't retrigger
+  // this (and flicker the loading spinner) unless something actually changed.
+  const activeChat = chats.find((c) => c.id === activeId) || null;
+  const activeContactId = activeChat?.contact_id;
+  const activeLastMessageAt = activeChat?.last_message_at;
+
   useEffect(() => {
     async function fetchMessages() {
-      if (!activeId) return;
-      
-      const activeChat = chats.find((c) => c.id === activeId);
-      if (!activeChat) return;
+      if (!activeContactId) return;
 
       try {
         setLoadingMessages(true);
         const { data, error: dbError } = await supabase
           .from("interaction_logs")
           .select("*")
-          .eq("contact_id", activeChat.contact_id)
+          .eq("contact_id", activeContactId)
           .order("created_at", { ascending: true });
 
         if (dbError) throw dbError;
@@ -241,14 +248,14 @@ export function SupervisorInbox({
     }
 
     fetchMessages();
-  }, [activeId, chats, supabase]);
+  }, [activeContactId, activeLastMessageAt, supabase]);
 
   // Auto-scroll to bottom of messages
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
 
-  const active = chats.find((c) => c.id === activeId);
+  const active = activeChat;
 
   const filteredChats = chats.filter((c) =>
     c.student_name.toLowerCase().includes(searchQuery.toLowerCase())

@@ -112,20 +112,12 @@ export async function GET(request: Request) {
   if (assigneeIds.length > 0) {
     const { data: assignees } = await serviceClient
       .from("internal_users")
-      .select("id, full_name")
+      .select("id, full_name, ambassador_profiles(avatar_colour)")
       .in("id", assigneeIds);
 
-    const colours = [
-      "bg-blue-100 text-blue-700",
-      "bg-pink-100 text-pink-700",
-      "bg-violet-100 text-violet-700",
-      "bg-rose-100 text-rose-700",
-      "bg-amber-100 text-amber-700",
-      "bg-emerald-100 text-emerald-700",
-    ];
-
     if (assignees) {
-      assignees.forEach((a, i) => {
+      assignees.forEach((a: any) => {
+        const profile = Array.isArray(a.ambassador_profiles) ? a.ambassador_profiles[0] : a.ambassador_profiles;
         assigneeMap[a.id] = {
           full_name: a.full_name,
           initials: a.full_name
@@ -134,7 +126,7 @@ export async function GET(request: Request) {
             .join("")
             .toUpperCase()
             .slice(0, 2),
-          colour: colours[i % colours.length],
+          colour: profile?.avatar_colour || "bg-gray-100 text-gray-700",
         };
       });
     }
