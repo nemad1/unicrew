@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/auth-context";
 import { AvatarUploader } from "@/components/profile/AvatarUploader";
+import { ChangePasswordCard } from "@/components/profile/ChangePasswordCard";
 import { HashtagList } from "@/components/peers/HashtagList";
 import { ClubsSocietiesList } from "@/components/peers/ClubsSocietiesList";
 import { DAY_ORDER, DAY_LABELS, type AvailabilityDay, type AvailabilityEntry } from "@/components/peers/types";
@@ -197,6 +198,8 @@ export default function ProfilePage() {
             </div>
           )}
         </section>
+
+        <ChangePasswordCard email={profile.email} />
 
         {isAmbassador && (
           <>
