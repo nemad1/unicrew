@@ -1,7 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { ChevronLeft, ChevronRight, Plus, CalendarDays as CalendarIcon } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  CalendarDays as CalendarIcon,
+  Loader2,
+  Pencil,
+  Trash2,
+} from "lucide-react";
+import { toast } from "sonner";
 import {
   addDays,
   addMonths,
@@ -10,6 +19,7 @@ import {
   isSameDay,
   startOfWeek,
 } from "date-fns";
+import { useAuth } from "@/contexts/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,7 +58,43 @@ type CalEvent = {
   tone: Tone;
   startTime: Date;
   endTime: Date;
+  contactId: string | null;
+  createdBy: string;
 };
+
+type AttendeeOption = { value: string; name: string };
+
+type AppointmentRow = {
+  id: string;
+  title: string;
+  context: string | null;
+  tone: string;
+  start_time: string;
+  end_time: string;
+  contact_id: string | null;
+  created_by: string;
+  contact: { id: string; name: string | null; phone_number: string } | null;
+  creator: { id: string; full_name: string } | null;
+};
+
+type InboxContactRow = { contact_id: string | null; student_name: string };
+
+function mapAppointment(row: AppointmentRow): CalEvent {
+  const contactName: string | null = row.contact?.name || row.contact?.phone_number || null;
+  const creatorName: string | null = row.creator?.full_name || null;
+  return {
+    id: row.id,
+    title: row.title,
+    subtitle: contactName ? `With ${contactName}` : undefined,
+    attendees: [contactName, creatorName].filter((v): v is string => Boolean(v)),
+    context: row.context || "",
+    tone: (row.tone as Tone) || "blue",
+    startTime: new Date(row.start_time),
+    endTime: new Date(row.end_time),
+    contactId: row.contact_id ?? null,
+    createdBy: row.created_by,
+  };
+}
 
 type View = "Day" | "Work Week" | "Week" | "Month";
 
@@ -56,54 +102,6 @@ const SLOT_HEIGHT = 64;
 const START_HOUR = 9;
 const END_HOUR = 17;
 const TOTAL_HEIGHT = (END_HOUR - START_HOUR) * SLOT_HEIGHT;
-
-const initialEvents: CalEvent[] = [
-  {
-    id: "1",
-    title: "Escalation: Visa Issue — Carlos Mendoza",
-    subtitle: "Counselor Review · Intent: Visas (92%)",
-    attendees: ["Carlos Mendoza", "Amelia Park"],
-    context: "AI detected high anxiety regarding visa processing.",
-    tone: "amber",
-    startTime: new Date(2026, 5, 17, 10, 0),
-    endTime: new Date(2026, 5, 17, 11, 0),
-  },
-  {
-    id: "2",
-    title: "Peer Consult: Aisha & Adel Z.",
-    subtitle: "Observer Mode active",
-    attendees: ["Aisha Binte Rahman", "Adel Zeinab"],
-    context: "Peer-led campus life discussion with supervisor observing.",
-    tone: "blue",
-    startTime: new Date(2026, 5, 17, 13, 0),
-    endTime: new Date(2026, 5, 17, 13, 30),
-  },
-  {
-    id: "3",
-    title: "Campus Tour Prep: Alyssandra F.",
-    attendees: ["Alyssandra Fong"],
-    context: "Preparing ambassador for tomorrow's campus tour cohort.",
-    tone: "blue",
-    startTime: new Date(2026, 5, 18, 11, 0),
-    endTime: new Date(2026, 5, 18, 12, 0),
-  },
-  {
-    id: "4",
-    title: "Enrolled Orientation — Group B",
-    attendees: ["Mei Lin Zhao", "Olivia Bennett", "Noah Williams"],
-    context: "Onboarding session for newly enrolled September 2026 intake.",
-    tone: "green",
-    startTime: new Date(2026, 5, 19, 15, 0),
-    endTime: new Date(2026, 5, 19, 16, 0),
-  },
-];
-
-const attendeeOptions: { value: string; name: string }[] = [
-  { value: "carlos", name: "Carlos Mendoza" },
-  { value: "aisha", name: "Aisha Binte Rahman" },
-  { value: "priya", name: "Priya Nair" },
-  { value: "yuki", name: "Yuki Tanaka" },
-];
 
 const toneStyles: Record<Tone, string> = {
   amber: "bg-amber-50 border-l-amber-500",
@@ -165,9 +163,46 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 
 export default function CalendarPage() {
   const isMobile = useMediaQuery("(max-width: 767px)");
-  const [currentDate, setCurrentDate] = useState<Date>(new Date(2026, 5, 17));
+  const { authUser, role } = useAuth();
+  const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [currentView, setCurrentView] = useState<View>(isMobile ? "Day" : "Work Week");
-  const [events, setEvents] = useState<CalEvent[]>(initialEvents);
+  const [events, setEvents] = useState<CalEvent[]>([]);
+  const [attendeeOptions, setAttendeeOptions] = useState<AttendeeOption[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const loadEvents = useCallback(async () => {
+    setLoadingEvents(true);
+    try {
+      const res = await fetch("/api/appointments");
+      const data = await res.json();
+      if (Array.isArray(data)) setEvents(data.map(mapAppointment));
+    } catch {
+      toast.error("Failed to load appointments.");
+    } finally {
+      setLoadingEvents(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadEvents();
+    // Contacts eligible as an appointment attendee — scoped the same way
+    // /api/inbox already scopes chats (own for ambassadors, team for
+    // counselors, all for admins).
+    fetch("/api/inbox")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setAttendeeOptions(
+            (data as InboxContactRow[])
+              .filter((c) => c.contact_id)
+              .map((c) => ({ value: c.contact_id as string, name: c.student_name }))
+          );
+        }
+      })
+      .catch(() => {});
+  }, [loadEvents]);
 
   // Force Day view on mobile if it isn't already Day or Agenda (if agenda existed)
   useEffect(() => {
@@ -177,48 +212,107 @@ export default function CalendarPage() {
   }, [isMobile]);
   const [selectedEvent, setSelectedEvent] = useState<CalEvent | null>(null);
   const [newOpen, setNewOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // New Appointment form state
   const [formTitle, setFormTitle] = useState("");
-  const [formDate, setFormDate] = useState(format(new Date(2026, 5, 17), "yyyy-MM-dd"));
+  const [formDate, setFormDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [formTime, setFormTime] = useState("10:00");
   const [formAttendee, setFormAttendee] = useState("");
 
   const resetForm = () => {
+    setEditingId(null);
     setFormTitle("");
     setFormDate(format(currentDate, "yyyy-MM-dd"));
     setFormTime("10:00");
     setFormAttendee("");
   };
 
-  const handleCreateAppointment = () => {
+  const openNewAppointment = () => {
+    resetForm();
+    setNewOpen(true);
+  };
+
+  const openEditAppointment = (ev: CalEvent) => {
+    setEditingId(ev.id);
+    setFormTitle(ev.title);
+    setFormDate(format(ev.startTime, "yyyy-MM-dd"));
+    setFormTime(format(ev.startTime, "HH:mm"));
+    setFormAttendee(ev.contactId || "");
+    setSelectedEvent(null);
+    setNewOpen(true);
+  };
+
+  const handleSubmitAppointment = async () => {
     if (!formTitle.trim()) return;
     const [year, month, day] = formDate.split("-").map(Number);
     const [hh, mm] = formTime.split(":").map(Number);
     const startTime = new Date(year, month - 1, day, hh, mm);
     const endTime = new Date(startTime.getTime() + 30 * 60000);
-    const attendee = attendeeOptions.find((a) => a.value === formAttendee);
-    const newEvent: CalEvent = {
-      id: `ev-${Date.now()}`,
-      title: formTitle.trim(),
-      attendees: attendee ? [attendee.name] : [],
-      context: "Manually scheduled appointment.",
-      tone: "blue",
-      startTime,
-      endTime,
-    };
-    setEvents((prev) => [...prev, newEvent]);
-    setCurrentDate(startTime);
-    setNewOpen(false);
-    resetForm();
+
+    setSubmitting(true);
+    try {
+      const body: Record<string, unknown> = {
+        title: formTitle.trim(),
+        start_time: startTime.toISOString(),
+        end_time: endTime.toISOString(),
+        contact_id: formAttendee || null,
+      };
+      if (!editingId) body.context = "Manually scheduled appointment.";
+
+      const res = await fetch(editingId ? `/api/appointments/${editingId}` : "/api/appointments", {
+        method: editingId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to save appointment.");
+        return;
+      }
+
+      const mapped = mapAppointment(data.appointment);
+      setEvents((prev) =>
+        editingId ? prev.map((e) => (e.id === editingId ? mapped : e)) : [...prev, mapped]
+      );
+      setCurrentDate(startTime);
+      setNewOpen(false);
+      resetForm();
+      toast.success(editingId ? "Appointment updated." : "Appointment scheduled.");
+    } catch {
+      toast.error("Failed to save appointment.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  // "Current time" indicator at 11:30 AM
-  const nowTop = ((11 - START_HOUR) * 60 + 30) * (SLOT_HEIGHT / 60);
+  const handleDeleteEvent = async (ev: CalEvent) => {
+    if (!confirm(`Delete "${ev.title}"?`)) return;
+    setDeletingId(ev.id);
+    try {
+      const res = await fetch(`/api/appointments/${ev.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Failed to delete appointment.");
+        return;
+      }
+      setEvents((prev) => prev.filter((e) => e.id !== ev.id));
+      setSelectedEvent(null);
+      toast.success("Appointment deleted.");
+    } catch {
+      toast.error("Failed to delete appointment.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const today = new Date();
+  const now = new Date();
+  const showNowIndicator = now.getHours() >= START_HOUR && now.getHours() < END_HOUR;
+  const nowTop = ((now.getHours() - START_HOUR) * 60 + now.getMinutes()) * (SLOT_HEIGHT / 60);
 
   const days = getVisibleDays(currentDate, currentView);
   const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i);
-  const today = new Date(2026, 5, 17); // demo "today"
 
   const navigate = (dir: -1 | 1) => {
     if (currentView === "Day") setCurrentDate((d) => addDays(d, dir));
@@ -291,7 +385,7 @@ export default function CalendarPage() {
           <div className="flex items-center gap-2">
             <Button
               className="bg-blue-700 hover:bg-blue-800 text-white"
-              onClick={() => setNewOpen(true)}
+              onClick={openNewAppointment}
             >
               <Plus className="w-4 h-4 mr-1" />
               New Appointment
@@ -304,7 +398,11 @@ export default function CalendarPage() {
         )}
       </div>
 
-      {currentView === "Month" ? (
+      {loadingEvents ? (
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 text-blue-700 animate-spin" />
+        </div>
+      ) : currentView === "Month" ? (
         <MonthView currentDate={currentDate} events={events} onSelect={setSelectedEvent} />
       ) : (
         <>
@@ -383,7 +481,7 @@ export default function CalendarPage() {
               })}
 
               {/* Current time indicator — only when today is in range */}
-              {days.some((d) => isSameDay(d, today)) && (
+              {showNowIndicator && days.some((d) => isSameDay(d, today)) && (
                 <div
                   className="absolute left-0 right-0 pointer-events-none z-10"
                   style={{ top: nowTop }}
@@ -442,6 +540,34 @@ export default function CalendarPage() {
                 <Button className="w-full bg-blue-700 hover:bg-blue-800 text-white">
                   Join Consultation / View Chat
                 </Button>
+
+                {(selectedEvent.createdBy === authUser?.id || role === "admin") && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 border-gray-200"
+                      onClick={() => openEditAppointment(selectedEvent)}
+                    >
+                      <Pencil className="w-3.5 h-3.5 mr-1.5" />
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 border-gray-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                      disabled={deletingId === selectedEvent.id}
+                      onClick={() => handleDeleteEvent(selectedEvent)}
+                    >
+                      {deletingId === selectedEvent.id ? (
+                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                      )}
+                      Delete
+                    </Button>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -458,7 +584,7 @@ export default function CalendarPage() {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>New Appointment</DialogTitle>
+            <DialogTitle>{editingId ? "Edit Appointment" : "New Appointment"}</DialogTitle>
             <DialogDescription>
               Schedule a consultation, peer chat, or orientation event.
             </DialogDescription>
@@ -536,10 +662,11 @@ export default function CalendarPage() {
             </Button>
             <Button
               className="bg-blue-700 hover:bg-blue-800 text-white"
-              disabled={!formTitle.trim()}
-              onClick={handleCreateAppointment}
+              disabled={!formTitle.trim() || submitting}
+              onClick={handleSubmitAppointment}
             >
-              Create Appointment
+              {submitting && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+              {editingId ? "Save Changes" : "Create Appointment"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -560,7 +687,7 @@ function MonthView({
   const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
   const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 });
   const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
-  const today = new Date(2026, 5, 17);
+  const today = new Date();
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
