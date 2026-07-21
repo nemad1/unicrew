@@ -17,3 +17,4 @@ UPDATE contacts c
 SET last_analyzed_message_at = l.created_at
 FROM interaction_logs l
 WHERE c.last_analyzed_message_id = l.id;
+d

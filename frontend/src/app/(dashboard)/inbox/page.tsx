@@ -285,6 +285,11 @@ export default function InboxPage() {
 
   const [showProfile, setShowProfile] = useState(false);
 
+  const handleConnected = useCallback((sid?: string) => {
+    if (sid) setSessionId(sid);
+    setWhatsappStatus("CONNECTED");
+  }, []);
+
   if ((role === "counselor" || role === "admin") && inboxMode === "team") {
     return (
       <div className="flex-1 flex h-full overflow-hidden">
@@ -322,11 +327,6 @@ export default function InboxPage() {
       </div>
     </div>
   ) : undefined;
-
-  const handleConnected = useCallback((sid?: string) => {
-    if (sid) setSessionId(sid);
-    setWhatsappStatus("CONNECTED");
-  }, []);
 
   return (
     <div className="flex-1 flex h-full overflow-hidden">
