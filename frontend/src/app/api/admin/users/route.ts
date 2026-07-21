@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+import { logAudit } from "@/lib/auditLog";
 
 // Admin-only API: Create a new user or list all users
 // Uses the Supabase Service Role key for admin.createUser()
@@ -162,6 +163,12 @@ export async function POST(request: Request) {
       user_id: newUserId,
     });
   }
+
+  await logAudit(adminClient, {
+    userId: caller.id,
+    actionType: "user_created",
+    meta: { target_user_id: newUserId, target_email: email, target_role: role },
+  });
 
   return NextResponse.json(
     {

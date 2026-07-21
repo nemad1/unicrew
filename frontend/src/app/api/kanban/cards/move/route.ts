@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { createClient as createServerSupabase } from '@/lib/supabase/server';
+import { logAudit } from '@/lib/auditLog';
 
 const supabase = createAdminClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -83,7 +84,7 @@ export async function PUT(request: Request) {
 
     const { data: card } = await supabase
       .from('kanban_cards')
-      .select('id, contacts ( id, team_id, assigned_to )')
+      .select('id, stage_id, contacts ( id, team_id, assigned_to )')
       .eq('id', card_id)
       .single();
 
@@ -120,6 +121,13 @@ export async function PUT(request: Request) {
     if (error) throw error;
 
     await maybeSendFeedbackPrompt(card_id);
+
+    await logAudit(supabase, {
+      userId: user.id,
+      contactId: contact.id,
+      actionType: 'stage_move',
+      meta: { card_id, from_stage_id: card.stage_id, to_stage_id: new_stage_id },
+    });
 
     return NextResponse.json({ success: true, card: data });
   } catch (error: any) {

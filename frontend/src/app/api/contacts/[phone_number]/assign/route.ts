@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { createClient as createServerSupabase } from '@/lib/supabase/server';
+import { logAudit } from '@/lib/auditLog';
 
 const supabase = createAdminClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -74,6 +75,13 @@ export async function PUT(request: Request, { params }: { params: Promise<{ phon
       .single();
 
     if (error) throw error;
+
+    await logAudit(supabase, {
+      userId: user.id,
+      contactId: contact.id,
+      actionType: 'contact_reassigned',
+      meta: { to_ambassador_id: assignee.id, to_ambassador_name: assignee.full_name },
+    });
 
     return NextResponse.json({ success: true, contact: updated, assignee: { id: assignee.id, name: assignee.full_name } });
   } catch (error: any) {

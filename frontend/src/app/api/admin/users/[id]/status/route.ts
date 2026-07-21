@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+import { logAudit } from "@/lib/auditLog";
 
 function getAdminClient() {
   return createClient(
@@ -68,6 +69,12 @@ export async function PATCH(
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  await logAudit(adminClient, {
+    userId: caller.id,
+    actionType: is_active ? "user_reactivated" : "user_deactivated",
+    meta: { target_user_id: id },
+  });
 
   return NextResponse.json({ success: true, user: data });
 }

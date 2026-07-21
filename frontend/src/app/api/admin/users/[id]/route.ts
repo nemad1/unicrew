@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+import { logAudit } from "@/lib/auditLog";
 
 function getAdminClient() {
   return createClient(
@@ -142,6 +143,12 @@ export async function DELETE(
 
   const adminClient = getAdminClient();
 
+  const { data: target } = await adminClient
+    .from("internal_users")
+    .select("email, full_name")
+    .eq("id", id)
+    .single();
+
   // Delete from internal_users (cascades to ambassador_profiles)
   const { error: profileError } = await adminClient
     .from("internal_users")
@@ -161,6 +168,12 @@ export async function DELETE(
       { status: 500 }
     );
   }
+
+  await logAudit(adminClient, {
+    userId: caller.id,
+    actionType: "user_deleted",
+    meta: { target_user_id: id, target_email: target?.email, target_name: target?.full_name },
+  });
 
   return NextResponse.json({ success: true });
 }
