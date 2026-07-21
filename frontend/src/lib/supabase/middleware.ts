@@ -43,8 +43,14 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse;
   }
 
-  // If there's no authenticated user and they're not on the login page, redirect
-  if (!user && pathname !== "/login") {
+  // /reset-password must stay reachable without an existing session: the
+  // recovery link lands here with a `?code=` param that the browser client
+  // exchanges for a (temporary, recovery-only) session client-side, after
+  // this request has already been resolved.
+  const publicPaths = ["/login", "/reset-password"];
+
+  // If there's no authenticated user and they're not on a public page, redirect
+  if (!user && !publicPaths.includes(pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

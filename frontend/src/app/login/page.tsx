@@ -18,8 +18,29 @@ export default function LoginPage() {
   const [emailError, setEmailError] = useState(false);
   const [passwordError, setPasswordError] = useState(false);
   const [showReset, setShowReset] = useState(false);
+  const [resetSending, setResetSending] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  const handleSendReset = async () => {
+    if (email.trim() === "") {
+      setEmailError(true);
+      return;
+    }
+
+    setResetSending(true);
+    try {
+      await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+    } finally {
+      // Show the same confirmation whether or not the email is registered,
+      // so this can't be used to enumerate valid accounts.
+      setResetSent(true);
+      setResetSending(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,7 +141,10 @@ export default function LoginPage() {
               </Label>
               <button
                 type="button"
-                onClick={() => setShowReset((s) => !s)}
+                onClick={() => {
+                  setShowReset((s) => !s);
+                  setResetSent(false);
+                }}
                 className="text-xs text-blue-700 hover:text-blue-800"
               >
                 Forgot password?
@@ -147,16 +171,30 @@ export default function LoginPage() {
               <p className="text-xs text-red-500">This field is required</p>
             )}
             {showReset && (
-              <p className="mt-1 text-xs text-gray-600 bg-blue-50 border border-blue-100 rounded-md p-2.5">
-                Please contact IT Support at{" "}
-                <a
-                  href="mailto:itsupport@university.edu"
-                  className="text-blue-700 hover:text-blue-800 underline"
-                >
-                  itsupport@university.edu
-                </a>{" "}
-                to reset your password.
-              </p>
+              <div className="mt-1 bg-blue-50 border border-blue-100 rounded-md p-2.5 space-y-2">
+                {resetSent ? (
+                  <p className="text-xs text-gray-700">
+                    If an account exists for that email, a password reset link has been sent.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-xs text-gray-600">
+                      Enter your email above, then request a reset link.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={resetSending}
+                      onClick={handleSendReset}
+                      className="w-full"
+                    >
+                      {resetSending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                      Send reset link
+                    </Button>
+                  </>
+                )}
+              </div>
             )}
           </div>
 
