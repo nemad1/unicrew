@@ -12,7 +12,6 @@ import {
   GitBranch,
   CalendarDays,
   LogOut,
-  Settings,
   PanelLeftClose,
   PanelLeftOpen,
   Sparkles,
@@ -30,7 +29,6 @@ const getNavItems = (role: Role) => {
       { name: "Inbox", href: "/inbox", icon: Inbox },
       { name: "User Management", href: "/admin/users", icon: Users },
       { name: "AI Router Admin", href: "/admin/intent-router", icon: GitBranch },
-      { name: "Settings", href: "/admin/settings", icon: Settings },
     ];
   } else if (role === "ambassador") {
     return [
