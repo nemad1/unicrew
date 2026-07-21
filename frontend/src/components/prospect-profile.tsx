@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/contexts/auth-context";
 import {
   ChevronLeft,
   Mail,
@@ -76,6 +77,29 @@ function deriveInterests(contact: { top_interests?: unknown; ai_tags?: unknown }
     return contact.ai_tags.map((t: any) => (typeof t === "string" ? { label: t } : t));
   }
   return [];
+}
+
+type NoteRow = {
+  id: string;
+  content: string;
+  created_at: string;
+  author: { id: string; full_name: string; role: string } | null;
+};
+
+function roleLabel(role?: string | null): string {
+  if (role === "admin") return "Admin";
+  if (role === "counselor") return "Counselor";
+  if (role === "ambassador") return "Ambassador";
+  return "Staff";
+}
+
+function mapNote(row: NoteRow): ProspectNote {
+  return {
+    author: row.author?.full_name || "Unknown",
+    role: roleLabel(row.author?.role),
+    time: new Date(row.created_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" }),
+    body: row.content,
+  };
 }
 
 function SentimentIcon({ sentiment, className }: { sentiment?: string | null; className?: string }) {
@@ -191,7 +215,10 @@ export function ProspectProfile({
   const [prospect, setProspect] = useState<ProspectData | null>(null);
   const [loading, setLoading] = useState(true);
   const [notes, setNotes] = useState<ProspectNote[]>([]);
+  const [notesLoading, setNotesLoading] = useState(true);
+  const [savingNote, setSavingNote] = useState(false);
   const [draft, setDraft] = useState("");
+  const { user: currentUser } = useAuth();
   const [editingFields, setEditingFields] = useState<Record<string, boolean>>({});
   const [stages, setStages] = useState<{ id: string; name: string }[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -246,6 +273,27 @@ export function ProspectProfile({
     fetchConcerns();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawPhone]);
+
+  const loadNotes = useCallback(async () => {
+    if (!rawPhone) {
+      setNotesLoading(false);
+      return;
+    }
+    setNotesLoading(true);
+    try {
+      const res = await fetch(`/api/contacts/${rawPhone}/notes`);
+      const data = await res.json();
+      if (Array.isArray(data)) setNotes(data.map(mapNote));
+    } catch (err) {
+      console.error("Error fetching notes:", err);
+    } finally {
+      setNotesLoading(false);
+    }
+  }, [rawPhone]);
+
+  useEffect(() => {
+    loadNotes();
+  }, [loadNotes]);
 
   useEffect(() => {
     fetch('/api/kanban/stages')
@@ -347,19 +395,38 @@ export function ProspectProfile({
     );
   }
 
-  const saveNote = () => {
+  const saveNote = async () => {
     const text = draft.trim();
-    if (!text) return;
-    setNotes((prev) => [
-      {
-        author: readOnly ? "Adel Zeinab" : "Amelia Park",
-        role: readOnly ? "Ambassador" : "Admissions Lead",
-        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        body: text,
-      },
-      ...prev,
-    ]);
-    setDraft("");
+    if (!text || !rawPhone) return;
+    setSavingNote(true);
+    try {
+      const res = await fetch(`/api/contacts/${rawPhone}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        console.error("Error saving note:", data.error);
+        return;
+      }
+      setNotes((prev) => [
+        data.note
+          ? mapNote(data.note)
+          : {
+              author: currentUser?.full_name || "You",
+              role: roleLabel(currentUser?.role),
+              time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+              body: text,
+            },
+        ...prev,
+      ]);
+      setDraft("");
+    } catch (err) {
+      console.error("Error saving note:", err);
+    } finally {
+      setSavingNote(false);
+    }
   };
 
   const handleFieldSave = async (label: string, newValue: string) => {
@@ -633,11 +700,23 @@ export function ProspectProfile({
                   size="sm"
                   className="bg-blue-700 hover:bg-blue-800 text-white"
                   onClick={saveNote}
+                  disabled={!draft.trim() || savingNote}
                 >
+                  {savingNote ? (
+                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1.5" />
+                  ) : null}
                   Save Note
                 </Button>
               </div>
               <div className="mt-4 space-y-3">
+                {notesLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-400" />
+                    Loading notes...
+                  </div>
+                ) : notes.length === 0 ? (
+                  <p className="text-xs text-gray-400">No notes yet.</p>
+                ) : null}
                 {notes.map((n, i) => (
                   <div key={i} className="border border-gray-200 rounded-md p-3 bg-white">
                     <div className="flex items-center justify-between gap-2 mb-1">
