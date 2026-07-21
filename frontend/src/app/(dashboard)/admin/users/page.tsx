@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Pencil, UserX, UserCheck, Trash2, Plus, Loader2, Crown, Users, Shield } from "lucide-react";
+import { Pencil, UserX, UserCheck, Trash2, Plus, Loader2, Crown, Users, Shield, Users2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { CreateUserModal } from "@/components/admin/create-user-modal";
 import { EditUserModal } from "@/components/admin/edit-user-modal";
+import { ManageTeamsModal } from "@/components/admin/manage-teams-modal";
 
 type InternalUser = {
   id: string;
@@ -201,6 +202,7 @@ export default function UserManagementPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showTeamsModal, setShowTeamsModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<InternalUser | null>(null);
@@ -223,24 +225,34 @@ export default function UserManagementPage() {
     }
   }, []);
 
+  const fetchTeams = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/teams");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setTeams(
+          data.map((t: any) => ({
+            id: t.id,
+            name: t.name,
+            accent_color: t.accent_color || null,
+            lead: Array.isArray(t.lead) ? t.lead[0] || null : t.lead || null,
+          }))
+        );
+      }
+    } catch (err) {
+      console.error("Error fetching teams:", err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchUsers();
-    fetch("/api/admin/teams")
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setTeams(
-            data.map((t: any) => ({
-              id: t.id,
-              name: t.name,
-              accent_color: t.accent_color || null,
-              lead: Array.isArray(t.lead) ? t.lead[0] || null : t.lead || null,
-            }))
-          );
-        }
-      })
-      .catch(console.error);
-  }, [fetchUsers]);
+    fetchTeams();
+  }, [fetchUsers, fetchTeams]);
+
+  const handleTeamsChanged = () => {
+    fetchTeams();
+    fetchUsers();
+  };
 
   const handleDelete = async (userId: string) => {
     if (!confirm("Are you sure you want to remove this user?")) return;
@@ -356,6 +368,11 @@ export default function UserManagementPage() {
   const counselorCount = users.filter((u) => u.role === "counselor").length;
   const ambassadorCount = users.filter((u) => u.role === "ambassador").length;
 
+  const memberCounts = users.reduce<Record<string, number>>((acc, u) => {
+    if (u.team_id) acc[u.team_id] = (acc[u.team_id] || 0) + 1;
+    return acc;
+  }, {});
+
   return (
     <div className="flex-1 flex flex-col bg-gray-50 min-w-0 overflow-y-auto h-full">
       {/* Header */}
@@ -366,14 +383,25 @@ export default function UserManagementPage() {
             Manage Counselors and Student Ambassadors.
           </p>
         </div>
-        <Button
-          onClick={() => setShowModal(true)}
-          className="bg-blue-700 hover:bg-blue-800 text-white"
-          size="sm"
-        >
-          <Plus className="w-3.5 h-3.5 mr-1.5" />
-          Add New User
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => setShowTeamsModal(true)}
+            variant="outline"
+            className="border-gray-200"
+            size="sm"
+          >
+            <Users2 className="w-3.5 h-3.5 mr-1.5" />
+            Manage Teams
+          </Button>
+          <Button
+            onClick={() => setShowModal(true)}
+            className="bg-blue-700 hover:bg-blue-800 text-white"
+            size="sm"
+          >
+            <Plus className="w-3.5 h-3.5 mr-1.5" />
+            Add New User
+          </Button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -584,6 +612,14 @@ export default function UserManagementPage() {
         open={showModal}
         onClose={() => setShowModal(false)}
         onCreated={fetchUsers}
+      />
+
+      <ManageTeamsModal
+        open={showTeamsModal}
+        onClose={() => setShowTeamsModal(false)}
+        teams={teams}
+        memberCounts={memberCounts}
+        onChanged={handleTeamsChanged}
       />
 
       {/* key forces a clean remount per edited user so the modal's lazily-
