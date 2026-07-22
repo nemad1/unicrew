@@ -60,14 +60,81 @@ async function login(page, email) {
   await page.waitForTimeout(1500);
 }
 
-async function captureLoginScreen(browser) {
+async function captureSharedScreens(browser) {
   const dir = path.join(OUT_DIR, 'shared');
   fs.mkdirSync(dir, { recursive: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+
+  await page.goto(`${BASE_URL}/`, { waitUntil: 'networkidle' });
+  await page.screenshot({ path: path.join(dir, 'landing.png'), fullPage: true });
+  console.log('  - shared/landing.png');
+
   await page.goto(`${BASE_URL}/login`, { waitUntil: 'networkidle' });
   await page.screenshot({ path: path.join(dir, 'login.png'), fullPage: true });
-  await page.close();
   console.log('  - shared/login.png');
+
+  await page.close();
+}
+
+// Personal /inbox is live: it polls /api/whatsapp/status until the
+// account's linked WhatsApp session reports CONNECTED, then loads real
+// chats from OpenWA. Give that handshake extra time before giving up.
+async function waitForInboxReady(page) {
+  await page
+    .waitForSelector('div.w-\\[360px\\] button, text=Connect WhatsApp', { timeout: 25000 })
+    .catch(() => {});
+}
+
+// Contacts we know are "saved" in the CRM (see backend/scripts/seed-qa.js
+// REAL_CONTACT_ENRICHMENT) and have AI-profile data worth showing off,
+// preferred over WhatsApp's own "status" broadcast row or unmatched numbers.
+const PREFERRED_CONTACT_NAMES = ['Basem Customer', 'Elyas Ebrahim', 'Krishang', 'Sofia', 'Sharbin Samad'];
+
+// After the inbox screen loads, try to open a known, CRM-saved conversation
+// and its "View Profile" panel so we get one contact-profile screenshot per
+// role that actually has AI-analysis data to show (not the "status" row).
+async function captureInboxDetail(page, dir) {
+  const chatListScope = page.locator('div.w-\\[360px\\]');
+  let target = null;
+  for (const name of PREFERRED_CONTACT_NAMES) {
+    const candidate = chatListScope.getByText(name, { exact: false }).first();
+    if (await candidate.count().then((n) => n > 0).catch(() => false)) {
+      target = candidate;
+      break;
+    }
+  }
+  if (!target) {
+    // Fall back to the first real conversation row, skipping the "My
+    // Chats"/"Team Overview" toggle buttons which also live in this div.
+    const rows = chatListScope.locator('button:has(p)');
+    if (await rows.count().then((n) => n > 0).catch(() => false)) {
+      target = rows.first();
+    }
+  }
+  if (!target) {
+    console.log('  ! no conversations available to open (WhatsApp not connected / no chats yet)');
+    return;
+  }
+
+  await target.click();
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: path.join(dir, 'inbox-chat-open.png'), fullPage: true });
+  console.log(`  - ${path.basename(dir)}/inbox-chat-open.png`);
+
+  const viewProfileButton = page.getByText('View Profile', { exact: false }).first();
+  const hasProfileButton = await viewProfileButton.count().then((n) => n > 0).catch(() => false);
+  if (!hasProfileButton) {
+    console.log('  ! "View Profile" button not found');
+    return;
+  }
+
+  await viewProfileButton.click();
+  await page
+    .waitForSelector('text=AI Context Summary', { timeout: 10000 })
+    .catch(() => console.log('  ! profile did not finish loading within 10s, screenshotting anyway'));
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: path.join(dir, 'contact-profile.png'), fullPage: true });
+  console.log(`  - ${path.basename(dir)}/contact-profile.png`);
 }
 
 async function captureRole(browser, role) {
@@ -90,11 +157,16 @@ async function captureRole(browser, role) {
   for (const screen of role.screens) {
     try {
       await page.goto(`${BASE_URL}${screen.path}`, { waitUntil: 'networkidle', timeout: 20000 });
+      if (screen.name === 'inbox') await waitForInboxReady(page);
       await page.waitForTimeout(1000);
       const filePath = path.join(dir, `${screen.name}.png`);
       await page.screenshot({ path: filePath, fullPage: true });
       results.push({ screen: screen.name, path: filePath, ok: true });
       console.log(`  - ${role.slug}/${screen.name}.png`);
+
+      if (screen.name === 'inbox') {
+        await captureInboxDetail(page, dir);
+      }
     } catch (err) {
       results.push({ screen: screen.name, path: null, ok: false, reason: err.message });
       console.error(`  x ${screen.name}: ${err.message}`);
@@ -110,7 +182,7 @@ async function main() {
   const browser = await chromium.launch();
 
   const summary = {};
-  await captureLoginScreen(browser);
+  await captureSharedScreens(browser);
 
   for (const role of ROLES) {
     summary[role.slug] = await captureRole(browser, role);
