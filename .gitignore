@@ -34,6 +34,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# QA screenshots (contain seeded test-account data, not for git)
+/qa-screenshots/
+
 # vercel
 .vercel
 
